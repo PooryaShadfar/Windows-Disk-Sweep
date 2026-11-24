@@ -9,7 +9,7 @@ if not exist bin mkdir bin
 "%FW%\csc.exe" /nologo /target:winexe /platform:x64 /optimize+ /codepage:65001 ^
   /out:bin\DiskSweep.exe /win32icon:assets\DiskSweep.ico ^
   /resource:src\MainWindow.xaml,MainWindow.xaml /resource:assets\DiskSweep.ico,app.ico ^
-  /r:"%FW%\WPF\PresentationFramework.dll" /r:"%FW%\WPF\PresentationCore.dll" /r:"%FW%\WPF\WindowsBase.dll" /r:"%FW%\System.Xaml.dll" ^
+  /r:"%FW%\WPF\PresentationFramework.dll" /r:"%FW%\WPF\PresentationCore.dll" /r:"%FW%\WPF\WindowsBase.dll" /r:"%FW%\System.Xaml.dll" /r:System.Management.dll ^
   src\*.cs
 if errorlevel 1 (echo BUILD FAILED & exit /b 1)
 echo Built %~dp0bin\DiskSweep.exe

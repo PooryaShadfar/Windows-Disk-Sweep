@@ -18,9 +18,9 @@ using System.Threading.Tasks;
 [assembly: System.Reflection.AssemblyDescription("Find and remove junk files on Windows. You choose what goes.")]
 [assembly: System.Reflection.AssemblyProduct("Disk Sweep")]
 [assembly: System.Reflection.AssemblyCopyright("Copyright (c) 2026 Poorya Shadfar. MIT License.")]
-[assembly: System.Reflection.AssemblyVersion("1.1.0.0")]
-[assembly: System.Reflection.AssemblyFileVersion("1.1.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersion("1.1.0")]
+[assembly: System.Reflection.AssemblyVersion("1.2.0.0")]
+[assembly: System.Reflection.AssemblyFileVersion("1.2.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersion("1.2.0")]
 
 namespace DiskSweep
 {
@@ -694,6 +694,7 @@ namespace DiskSweep
                 if (moved != 5000 || !folderKept || !emptied) ok = false;
             }
             catch (Exception ex) { ok = false; log.AppendLine("ERROR: " + ex); }
+            try { if (!Health.SelfTest(log)) ok = false; } catch (Exception ex) { ok = false; log.AppendLine("health ERROR: " + ex.Message); }
             log.AppendLine(ok ? "SELFTEST PASS" : "SELFTEST FAIL");
             File.WriteAllText(Path.Combine(dir, "selftest.txt"), log.ToString());
             return ok ? 0 : 1;

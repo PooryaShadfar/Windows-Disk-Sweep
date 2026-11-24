@@ -34,7 +34,7 @@ namespace DiskSweep
             {"Line", "#E2E2E2"}, {"Text", "#1B1B1B"}, {"Muted", "#626262"}, {"Accent", "#0F6CBD"}, {"AccentFg", "#FFFFFF"},
             {"Track", "#E4E4E4"}, {"Thumb", "#C4C4C4"}, {"DangerBrush", "#C42B1C"}, {"DangerFg", "#FFFFFF"}, {"WarnFg", "#9D5D00"},
             {"AdminBg", "#ECECEC"}, {"AdminFg", "#555555"}, {"SafeBg", "#DFF6DD"}, {"SafeFg", "#0E700E"},
-            {"ReviewBg", "#FFF4CE"}, {"ReviewFg", "#8A5300"}
+            {"ReviewBg", "#FFF4CE"}, {"ReviewFg", "#8A5300"}, {"BadBg", "#FDE7E9"}, {"BadFg", "#A4262C"}
         };
 
         static readonly Dictionary<string, string> DarkMap = new Dictionary<string, string>
@@ -43,7 +43,7 @@ namespace DiskSweep
             {"Line", "#383838"}, {"Text", "#F3F3F3"}, {"Muted", "#A6A6A6"}, {"Accent", "#4CC2FF"}, {"AccentFg", "#00253D"},
             {"Track", "#3A3A3A"}, {"Thumb", "#5C5C5C"}, {"DangerBrush", "#D13438"}, {"DangerFg", "#FFFFFF"}, {"WarnFg", "#F2C661"},
             {"AdminBg", "#3A3A3A"}, {"AdminFg", "#D0D0D0"}, {"SafeBg", "#1D3B22"}, {"SafeFg", "#7FD47A"},
-            {"ReviewBg", "#43391A"}, {"ReviewFg", "#F2C661"}
+            {"ReviewBg", "#43391A"}, {"ReviewFg", "#F2C661"}, {"BadBg", "#4A2427"}, {"BadFg", "#FF99A4"}
         };
 
         public static ResourceDictionary Res;
@@ -133,6 +133,89 @@ namespace DiskSweep
         public string Name { get; set; }
         public string Glyph { get; set; }
         public string SizeText { get; set; }
+    }
+
+    // ------------------------------------------------------------------ drive health cards
+    class StatVM
+    {
+        public string Label { get; set; }
+        public string Value { get; set; }
+        public string Note { get; set; }
+    }
+
+    class DiskVM
+    {
+        public string Model { get; set; }
+        public string Sub { get; set; }
+        public string StatusText { get; set; }
+        public string StatusGlyph { get; set; }
+        public Brush StatusBg { get; set; }
+        public Brush StatusFg { get; set; }
+        public string WearText { get; set; }
+        public double WearValue { get; set; }
+        public Visibility WearVis { get; set; }
+        public List<StatVM> Stats { get; set; }
+        public string ProblemsText { get; set; }
+        public Visibility ProblemsVis { get; set; }
+        public string Hint { get; set; }
+        public Visibility HintVis { get; set; }
+
+        public static string Glyph(HealthLevel l)
+        {
+            return l == HealthLevel.Good ? "" : l == HealthLevel.Warning ? "" : l == HealthLevel.Bad ? "" : "";
+        }
+
+        public static string BgKey(HealthLevel l)
+        {
+            return l == HealthLevel.Good ? "SafeBg" : l == HealthLevel.Warning ? "ReviewBg" : l == HealthLevel.Bad ? "BadBg" : "AdminBg";
+        }
+
+        public static string FgKey(HealthLevel l)
+        {
+            return l == HealthLevel.Good ? "SafeFg" : l == HealthLevel.Warning ? "ReviewFg" : l == HealthLevel.Bad ? "BadFg" : "AdminFg";
+        }
+
+        public DiskVM(DiskHealth d, bool admin)
+        {
+            Model = d.Model;
+            Sub = d.Bus + " " + d.Kind + "  ·  " + Util.Fmt(d.Size) + (d.Letters.Count > 0 ? "  ·  " + string.Join(" ", d.Letters) : "");
+            StatusText = Health.LevelText(d.Level);
+            StatusGlyph = Glyph(d.Level);
+            StatusBg = Theme.Get(BgKey(d.Level));
+            StatusFg = Theme.Get(FgKey(d.Level));
+
+            WearVis = d.WearPercent.HasValue ? Visibility.Visible : Visibility.Collapsed;
+            WearValue = Math.Min(100, d.WearPercent ?? 0);
+            WearText = d.WearPercent.HasValue ? d.WearPercent + "%  ·  about " + Math.Max(0, 100 - d.WearPercent.Value) + "% left" : "";
+
+            var s = new List<StatVM> { new StatVM { Label = "Windows status", Value = d.WindowsStatus, Note = "from Windows" } };
+            if (d.Temperature.HasValue)
+                s.Add(new StatVM { Label = "Temperature", Value = d.Temperature + " °C", Note = d.TemperatureMax.HasValue ? "highest seen " + d.TemperatureMax + " °C" : "" });
+            if (d.PowerOnHours.HasValue)
+            {
+                double years = d.PowerOnHours.Value / (24.0 * 365);
+                s.Add(new StatVM { Label = "Power-on time", Value = d.PowerOnHours.Value.ToString("N0") + " hours", Note = "about " + years.ToString("0.0") + " years running" });
+            }
+            if (d.ReadErrors.HasValue || d.WriteErrors.HasValue)
+            {
+                long e = (d.ReadErrors ?? 0) + (d.WriteErrors ?? 0);
+                s.Add(new StatVM { Label = "Uncorrected errors", Value = e == 0 ? "None" : e.ToString("N0"), Note = "reads and writes" });
+            }
+            if (d.Reallocated.HasValue) s.Add(new StatVM { Label = "Replaced sectors", Value = d.Reallocated == 0 ? "None" : d.Reallocated.Value.ToString("N0"), Note = "bad spots the drive swapped out" });
+            if (d.Pending.HasValue) s.Add(new StatVM { Label = "Pending sectors", Value = d.Pending == 0 ? "None" : d.Pending.Value.ToString("N0"), Note = "unreadable spots waiting" });
+            if (d.PredictFailure.HasValue) s.Add(new StatVM { Label = "Failure warning", Value = d.PredictFailure.Value ? "Predicted" : "None", Note = "the drive's own check (SMART)" });
+            if (d.StartStops.HasValue) s.Add(new StatVM { Label = "Power cycles", Value = d.StartStops.Value.ToString("N0"), Note = "times switched on" });
+            Stats = s;
+
+            ProblemsText = string.Join("\n", d.Problems.Select(p => "•  " + p));
+            if (d.Level == HealthLevel.Bad) ProblemsText += "\nBack up important files from this drive soon.";
+            ProblemsVis = d.Problems.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+
+            Hint = d.DetailsAvailable ? "" : admin
+                ? "This drive doesn't share detailed health data with Windows. Some USB enclosures and older drives don't."
+                : "Run as administrator to see life used, temperature, power-on time and errors.";
+            HintVis = string.IsNullOrEmpty(Hint) ? Visibility.Collapsed : Visibility.Visible;
+        }
     }
 
     // ------------------------------------------------------------------ modern folder picker (IFileOpenDialog)
@@ -275,6 +358,7 @@ namespace DiskSweep
             histTotal = F<TextBlock>("HistTotal"); histSub = F<TextBlock>("HistSub"); aboutText = F<TextBlock>("AboutText");
             WireSettings();
             WireDrives();
+            WireHealth();
 
             view = new ListCollectionView(vms);
             view.GroupDescriptions.Add(new PropertyGroupDescription("Group"));
@@ -300,6 +384,7 @@ namespace DiskSweep
             {
                 if (e.Key == Key.Escape && overlay.Visibility == Visibility.Visible && dlgCancel.Visibility == Visibility.Visible) CloseDialog(0);
                 else if (e.Key == Key.Escape && settingsOverlay.Visibility == Visibility.Visible) CloseSettings();
+                else if (e.Key == Key.Escape && healthOverlay.Visibility == Visibility.Visible) healthOverlay.Visibility = Visibility.Collapsed;
                 if (e.Key == Key.F5 && !busy) Scan();
             };
             Window.Closing += (s, e) => { if (cleaning) e.Cancel = true; };
@@ -318,6 +403,68 @@ namespace DiskSweep
         }
 
         // ---------------------------------------------------------- drives
+        // ---------------------------------------------------------- drive health
+        List<DiskHealth> disks = new List<DiskHealth>();
+        FrameworkElement healthOverlay;
+        ItemsControl healthList;
+        TextBlock healthIntro, healthBadgeText;
+        System.Windows.Shapes.Ellipse healthDot;
+        Button btnHealthBadge;
+
+        void WireHealth()
+        {
+            healthOverlay = F<FrameworkElement>("HealthOverlay");
+            healthList = F<ItemsControl>("HealthList");
+            healthIntro = F<TextBlock>("HealthIntro");
+            healthBadgeText = F<TextBlock>("HealthBadgeText");
+            healthDot = F<System.Windows.Shapes.Ellipse>("HealthDot");
+            btnHealthBadge = F<Button>("BtnHealthBadge");
+            F<Button>("BtnHealth").Click += (s, e) => OpenHealth();
+            btnHealthBadge.Click += (s, e) => OpenHealth();
+            F<Button>("BtnCloseHealth").Click += (s, e) => healthOverlay.Visibility = Visibility.Collapsed;
+            healthOverlay.MouseLeftButtonDown += (s, e) => { if (e.OriginalSource == healthOverlay) healthOverlay.Visibility = Visibility.Collapsed; };
+            F<Button>("BtnHealthRefresh").Click += (s, e) => LoadHealth();
+            var admin = F<Button>("BtnHealthAdmin");
+            admin.Visibility = isAdmin ? Visibility.Collapsed : Visibility.Visible;
+            admin.Click += (s, e) => RestartAdmin();
+            Window.Loaded += (s, e) => LoadHealth();   // after the UI thread is running, so results come back to it
+        }
+
+        async void LoadHealth()
+        {
+            healthIntro.Text = "Reading drive health…";
+            try { disks = await Task.Run(() => Health.Read()); }
+            catch { disks = new List<DiskHealth>(); }
+            FillHealth();
+            UpdateHealthBadge();
+        }
+
+        void OpenHealth()
+        {
+            FillHealth();
+            healthOverlay.Visibility = Visibility.Visible;
+            F<Button>("BtnCloseHealth").Focus();
+        }
+
+        void FillHealth()
+        {
+            healthIntro.Text = disks.Count == 0 ? "Windows didn't report any drives."
+                : isAdmin ? "Read from your drives just now. The numbers come from the drives themselves, through Windows."
+                : "Basic status works for everyone. Life used, temperature, power-on time and error counts need administrator rights.";
+            healthList.ItemsSource = disks.Select(d => new DiskVM(d, isAdmin)).ToList();
+        }
+
+        void UpdateHealthBadge()
+        {
+            if (btnHealthBadge == null) return;
+            string letter = selectedDrive.TrimEnd('\\');
+            var d = disks.FirstOrDefault(x => x.Letters.Any(l => l.Equals(letter, StringComparison.OrdinalIgnoreCase)));
+            if (d == null) { btnHealthBadge.Visibility = Visibility.Collapsed; return; }
+            healthDot.Fill = Theme.Get(DiskVM.FgKey(d.Level));
+            healthBadgeText.Text = d.Kind + "  ·  " + Health.LevelText(d.Level) + (d.WearPercent.HasValue ? "  ·  " + d.WearPercent + "% used" : "");
+            btnHealthBadge.Visibility = Visibility.Visible;
+        }
+
         class DriveVM
         {
             public string Root { get; set; }
@@ -421,6 +568,8 @@ namespace DiskSweep
             Theme.Apply(Window.Resources, Settings.Theme);
             StyleTitleBar();
             Rebuild();   // badge colors are bound per item
+            FillHealth();
+            UpdateHealthBadge();
         }
 
         void SaveAlert()
@@ -551,6 +700,7 @@ namespace DiskSweep
             driveFree.Text = Util.Fmt(free) + " free";
             driveBar.Value = total > 0 ? used * 100.0 / total : 0;
             driveSub.Text = Util.Fmt(used) + " used of " + Util.Fmt(total);
+            UpdateHealthBadge();
 
             var shown = items.Where(i => !Settings.Hidden.ContainsKey(HideKey(i))).ToList();
             var avail = shown.Where(i => Available(i) && (i.Size < 0 || i.Size >= (1L << 20))).ToList();
@@ -800,6 +950,7 @@ namespace DiskSweep
             //   DiskSweep.exe --selftest emptyFolder             test delete logic on a fixture
             if (args.Length >= 1 && args[0] == "--check-space") return Settings.CheckSpace();   // run by Task Scheduler
                         if (args.Length >= 2 && args[0] == "--report") return Dev.Report(args);
+            if (args.Length >= 2 && args[0] == "--health-report") { File.WriteAllText(args[1], Health.Report()); return 0; }
             if (args.Length >= 2 && args[0] == "--selftest") return Dev.SelfTest(args[1]);
             //   DiskSweep.exe --test-item <folder>                adds that folder as a deletable item (UI testing)
             if (args.Length >= 2 && (args[0] == "--test-item" || args[0] == "--test-recycle")) { MainUi.TestItemPath = Path.GetFullPath(args[1]); MainUi.TestRecycle = args[0] == "--test-recycle"; }

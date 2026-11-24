@@ -12,7 +12,7 @@
 <p align="center">
   <a href="https://github.com/PooryaShadfar/Windows-Disk-Sweep/releases/latest"><img src="https://img.shields.io/github/v/release/PooryaShadfar/Windows-Disk-Sweep?label=download&color=0F6CBD" alt="Latest release"></a>
   <img src="https://img.shields.io/badge/Windows-10%20%7C%2011-0F6CBD" alt="Windows 10 and 11">
-  <img src="https://img.shields.io/badge/size-~170%20KB-brightgreen" alt="Size">
+  <img src="https://img.shields.io/badge/size-~200%20KB-brightgreen" alt="Size">
   <a href="LICENSE"><img src="https://img.shields.io/github/license/PooryaShadfar/Windows-Disk-Sweep?color=lightgrey" alt="MIT license"></a>
 </p>
 
@@ -37,15 +37,20 @@ Disk Sweep scans the usual places, shows how much each one takes, and lets you p
 - **Shows your largest files.** Lists the biggest files in your folders, such as old zips, videos and installers. These always go to the **Recycle Bin**, never straight to deletion.
 - **Undo-friendly.** "Check first" items go to the Recycle Bin by default, so a mistake can be undone.
 - **All your drives.** Switch between C:, D:, E: and so on in the drive card.
-- **Low-space alert.** Optional: Windows notifies you when a drive drops below a limit you set.
+- **Drive health.** See whether each SSD and HDD is healthy. As administrator you also see SSD life used, temperature, power-on time, error counts and HDD SMART warnings such as replaced sectors.
+- **Low-space and health alert.** Optional: Windows notifies you when a drive drops below a limit you set or reports a health problem.
 - **Hide items.** Click the eye button to never see an item again. You can bring it back in Settings.
 - **History.** See how much you've cleaned in total.
 - **Safe deletion.** It never follows links or junctions out of a folder, so pnpm stores and git worktrees can't pull in files from elsewhere. It handles very long paths and skips files that are in use.
 - **Modern UI.** Light, dark, or the same as Windows. You choose in Settings. Works with the keyboard and screen readers.
-- **Tiny and portable.** One ~170 KB `.exe`, no installer, no telemetry, no network access. It uses the .NET Framework 4.8 that ships with Windows.
+- **Tiny and portable.** One ~200 KB `.exe`, no installer, no telemetry, no network access. It uses the .NET Framework 4.8 that ships with Windows.
 
 <p align="center">
   <img src="docs/confirm.png" alt="Confirmation dialog before deleting" width="640">
+</p>
+
+<p align="center">
+  <img src="docs/health.png" alt="Drive health for SSD and HDD" width="640">
 </p>
 
 <p align="center">
@@ -109,11 +114,29 @@ Click the gear button to open Settings:
 
 - **Appearance:** same as Windows, Light or Dark.
 - **Safety:** send "Check first" items to the Recycle Bin (on by default).
-- **Low-space alert:** get a Windows notification when a drive drops below a limit you set. It checks every 3 hours while you're signed in, and notifies you at most once a day.
+- **Low-space and health alert:** get a Windows notification when a drive drops below a limit you set or reports a health problem. It checks every 3 hours while you're signed in, and notifies you at most once a day.
 - **Hidden items:** bring back items you hid.
 - **History:** total space cleaned and your recent cleanups.
 
 Settings are plain text files in `%LOCALAPPDATA%\DiskSweep`.
+
+## Drive health
+
+Click **Drive health** (or the health badge in the drive card) to see every SSD and HDD:
+
+| Shown | Needs admin | Where it comes from |
+|---|---|---|
+| Model, SSD or HDD, NVMe/SATA/USB, size, drive letters | No | Windows storage info |
+| Overall status: **Healthy**, **Needs attention** or **At risk** | No | Windows health status, plus the checks below when available |
+| SSD life used (%) | Yes | The drive's wear counter |
+| Temperature and highest temperature | Yes | Drive sensors |
+| Power-on time, power cycles | Yes | Drive counters |
+| Uncorrected read and write errors | Yes | Drive counters |
+| HDD: replaced sectors, pending sectors, failure prediction | Yes | SMART data |
+
+Disk Sweep only reads this data. It never writes to a drive's firmware or settings. Some USB enclosures and older drives don't pass health data to Windows, so for them only the basic status shows.
+
+"Needs attention" means one of these: Windows reports a warning, the SSD has used 80% or more of its rated life, the drive replaced bad sectors, sectors are waiting to be replaced, uncorrected errors happened, or the drive runs hot. "At risk" means Windows reports the drive as unhealthy, the drive predicts its own failure, the SSD's rated life is used up, or many sectors were replaced. If a drive is at risk, back up your files.
 
 ## Build from source
 
@@ -134,7 +157,8 @@ bin\DiskSweep.exe --report scan.txt [codeFolder]   :: scan only, write results t
 bin\DiskSweep.exe --selftest <emptyFolder>         :: test the delete logic on a generated fixture
 bin\DiskSweep.exe --test-item <folder>             :: show <folder> as a deletable item, for UI testing
 bin\DiskSweep.exe --test-recycle <path>            :: same, but the item goes to the Recycle Bin
-bin\DiskSweep.exe --check-space                    :: the low-space check that Task Scheduler runs
+bin\DiskSweep.exe --check-space                    :: the low-space and health check that Task Scheduler runs
+bin\DiskSweep.exe --health-report health.txt       :: write drive health to a text file (run as admin for full data)
 ```
 
 ### Project layout
@@ -143,6 +167,7 @@ bin\DiskSweep.exe --check-space                    :: the low-space check that T
 src/Engine.cs        what to look for, how to measure it, how to delete it
 src/Finders.cs       removed-app leftovers, large files, project build folders
 src/Settings.cs      settings, hidden items, history, low-space alert
+src/Health.cs        SSD/HDD health: status, wear, temperature, SMART
 src/App.cs           WPF window logic, theme, dialogs, settings page
 src/MainWindow.xaml  the layout and styles
 assets/              app icon and the script that draws it

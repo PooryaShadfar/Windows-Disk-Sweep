@@ -158,25 +158,38 @@ namespace DiskSweep
             catch { return new List<DriveInfo>(); }
         }
 
-        // Shows a Windows notification when a drive is low. At most once every 20 hours.
+        // Shows a Windows notification when a drive is low on space or reports a health problem.
+        // At most once every 20 hours.
         public static int CheckSpace()
         {
             Load();
             if (!AlertOn || (DateTime.Now - LastAlert).TotalHours < 20) return 0;
-            var low = FixedDrives().Where(d => d.AvailableFreeSpace < (long)AlertGB << 30).ToList();
-            if (low.Count == 0) return 0;
+            var lines = FixedDrives().Where(d => d.AvailableFreeSpace < (long)AlertGB << 30)
+                .Select(d => "Drive " + d.Name.TrimEnd('\\') + " has only " + Util.Fmt(d.AvailableFreeSpace) + " free.").ToList();
+            bool health = false;
+            try
+            {
+                foreach (var d in Health.Read().Where(x => x.Level == HealthLevel.Warning || x.Level == HealthLevel.Bad))
+                {
+                    health = true;
+                    lines.Add(d.Model + (d.Letters.Count > 0 ? " (" + string.Join(" ", d.Letters) + ")" : "") + ": "
+                              + (d.Problems.Count > 0 ? d.Problems[0] : Health.LevelText(d.Level)));
+                }
+            }
+            catch { }
+            if (lines.Count == 0) return 0;
             LastAlert = DateTime.Now;
             Save();
 
             string exe = Assembly.GetExecutingAssembly().Location;
-            string text = string.Join("\n", low.Select(d => "Drive " + d.Name.TrimEnd('\\') + " has only " + Util.Fmt(d.AvailableFreeSpace) + " free."))
-                          + "\nClick to open Disk Sweep.";
+            string text = string.Join("\n", lines) + "\nClick to open Disk Sweep.";
+            string title = health ? "Drive health warning" : "Low disk space";
             using (var ni = new System.Windows.Forms.NotifyIcon())
             {
                 try { ni.Icon = System.Drawing.Icon.ExtractAssociatedIcon(exe); } catch { ni.Icon = System.Drawing.SystemIcons.Warning; }
                 ni.Text = "Disk Sweep";
                 ni.Visible = true;
-                ni.BalloonTipTitle = "Low disk space";
+                ni.BalloonTipTitle = title;
                 ni.BalloonTipText = text;
                 ni.BalloonTipIcon = System.Windows.Forms.ToolTipIcon.Warning;
                 Action open = () => { try { Process.Start(exe); } catch { } System.Windows.Forms.Application.ExitThread(); };
