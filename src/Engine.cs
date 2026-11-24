@@ -1,0 +1,639 @@
+// Disk Sweep - engine: what to look for, how to measure it, how to delete it.
+// Nothing here runs on its own: the UI only deletes items the user ticked and confirmed.
+
+using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Diagnostics;
+using System.IO;
+using System.Linq;
+using System.Runtime.InteropServices;
+using System.Security.Principal;
+using System.Text;
+using System.Text.RegularExpressions;
+using System.Threading.Tasks;
+
+[assembly: System.Runtime.Versioning.TargetFramework(".NETFramework,Version=v4.8", FrameworkDisplayName = ".NET Framework 4.8")]
+[assembly: System.Reflection.AssemblyTitle("Disk Sweep")]
+[assembly: System.Reflection.AssemblyDescription("Find and remove junk files on Windows. You choose what goes.")]
+[assembly: System.Reflection.AssemblyProduct("Disk Sweep")]
+[assembly: System.Reflection.AssemblyCopyright("Copyright (c) 2026 Poorya Shadfar. MIT License.")]
+[assembly: System.Reflection.AssemblyVersion("1.0.0.0")]
+[assembly: System.Reflection.AssemblyFileVersion("1.0.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersion("1.0.0")]
+
+namespace DiskSweep
+{
+    static class Util
+    {
+        public static string Fmt(long b)
+        {
+            if (b < 0) return "?";
+            if (b >= 1L << 30) return (b / 1073741824.0).ToString("0.0") + " GB";
+            if (b >= 1L << 20) return (b / 1048576.0).ToString("0") + " MB";
+            if (b >= 1024) return (b / 1024.0).ToString("0") + " KB";
+            return b + " B";
+        }
+    }
+
+    enum Safety { Safe, Review }
+    enum Mode { Contents, Whole, RecycleBin, Command }
+
+    class CleanItem
+    {
+        public string Category;
+        public string Name;
+        public string Info = "";
+        public List<string> Paths = new List<string>();
+        public Mode Mode = Mode.Contents;
+        public Safety Safety = Safety.Safe;
+        public bool NeedsAdmin;
+        public long Size = -1;          // -1 = unknown / varies
+        public string Pattern;          // top-level file pattern (Contents mode), null = everything
+        public int MinAgeHours;         // skip files newer than this
+        public string Cmd;
+        public string CmdArgs;
+        public string[] Processes = new string[0];
+        public bool Checked;
+        public string RunningText;      // apps that should be closed first
+        public string Key { get { return Category + "|" + Name; } }
+    }
+
+    // ------------------------------------------------------------------ native helpers
+    static class Native
+    {
+        [StructLayout(LayoutKind.Sequential)]
+        struct SHQUERYRBINFO { public int cbSize; public long i64Size; public long i64NumItems; }
+
+        [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+        static extern int SHQueryRecycleBin(string pszRootPath, ref SHQUERYRBINFO info);
+
+        [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+        static extern int SHEmptyRecycleBin(IntPtr hwnd, string pszRootPath, uint flags);
+
+        [DllImport("user32.dll")]
+        public static extern bool SetProcessDPIAware();
+
+        public static long RecycleSize()
+        {
+            var i = new SHQUERYRBINFO();
+            i.cbSize = Marshal.SizeOf(typeof(SHQUERYRBINFO));
+            return SHQueryRecycleBin(null, ref i) == 0 ? i.i64Size : 0;
+        }
+
+        public static void EmptyRecycle() { SHEmptyRecycleBin(IntPtr.Zero, null, 1 | 2 | 4); }
+
+        public static string SysRoot { get { return Path.GetPathRoot(Environment.SystemDirectory); } }
+
+        public static long FreeBytes() { try { return new DriveInfo(SysRoot).AvailableFreeSpace; } catch { return 0; } }
+        public static long TotalBytes() { try { return new DriveInfo(SysRoot).TotalSize; } catch { return 0; } }
+
+        public static bool IsRunning(string name)
+        {
+            try
+            {
+                var p = Process.GetProcessesByName(name);
+                bool r = p.Length > 0;
+                foreach (var x in p) x.Dispose();
+                return r;
+            }
+            catch { return false; }
+        }
+
+        public static bool IsAdmin()
+        {
+            try { return new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator); }
+            catch { return false; }
+        }
+    }
+
+    // ------------------------------------------------------------------ file system
+    static class Fs
+    {
+        // \\?\ prefix: allows paths longer than 260 chars (deep node_modules).
+        public static string Long(string p)
+        {
+            if (p.StartsWith(@"\\?\")) return p;
+            if (p.StartsWith(@"\\")) return @"\\?\UNC\" + p.Substring(2);
+            return @"\\?\" + p;
+        }
+
+        public static bool IsLink(FileSystemInfo i) { return (i.Attributes & FileAttributes.ReparsePoint) != 0; }
+
+        public static bool Exists(string p)
+        {
+            try { var lp = Long(p); return Directory.Exists(lp) || File.Exists(lp); } catch { return false; }
+        }
+
+        static FileSystemInfo[] Entries(DirectoryInfo d)
+        {
+            try { return d.GetFileSystemInfos(); } catch { return new FileSystemInfo[0]; }
+        }
+
+        static FileInfo[] Files(DirectoryInfo d, string pattern)
+        {
+            try { return d.GetFiles(pattern); } catch { return new FileInfo[0]; }
+        }
+
+        public static DirectoryInfo[] Dirs(string path)
+        {
+            try { return new DirectoryInfo(Long(path)).GetDirectories(); } catch { return new DirectoryInfo[0]; }
+        }
+
+        // Size of a tree. Never follows junctions/symlinks (pnpm, worktrees...).
+        public static long TreeSize(DirectoryInfo d, DateTime cutoff)
+        {
+            long t = 0;
+            foreach (var e in Entries(d))
+            {
+                try
+                {
+                    if (IsLink(e)) continue;
+                    var f = e as FileInfo;
+                    if (f != null) { if (f.LastWriteTime < cutoff) t += f.Length; }
+                    else t += TreeSize((DirectoryInfo)e, cutoff);
+                }
+                catch { }
+            }
+            return t;
+        }
+
+        // Deletes a tree. Junctions/symlinks are unlinked, their targets are never touched.
+        // Files in use are skipped. Returns bytes actually deleted.
+        public static long DeleteTree(DirectoryInfo d, DateTime cutoff, bool removeSelf)
+        {
+            long freed = 0;
+            foreach (var e in Entries(d))
+            {
+                try
+                {
+                    if (IsLink(e))
+                    {
+                        if (e is DirectoryInfo) Directory.Delete(e.FullName, false); else e.Delete();
+                        continue;
+                    }
+                    var f = e as FileInfo;
+                    if (f != null)
+                    {
+                        if (f.LastWriteTime >= cutoff) continue;
+                        long len = f.Length;
+                        if ((f.Attributes & FileAttributes.ReadOnly) != 0) f.Attributes = FileAttributes.Normal;
+                        f.Delete();
+                        freed += len;
+                    }
+                    else freed += DeleteTree((DirectoryInfo)e, cutoff, true);
+                }
+                catch { }
+            }
+            if (removeSelf)
+            {
+                try { d.Attributes = FileAttributes.Directory; d.Delete(false); } catch { }
+            }
+            return freed;
+        }
+
+        static DateTime Cutoff(int minAgeHours)
+        {
+            return minAgeHours > 0 ? DateTime.Now.AddHours(-minAgeHours) : DateTime.MaxValue;
+        }
+
+        public static long PathSize(string path, string pattern, int minAgeHours, bool whole)
+        {
+            try
+            {
+                string lp = Long(path);
+                if (File.Exists(lp)) return new FileInfo(lp).Length;
+                if (!Directory.Exists(lp)) return 0;
+                var d = new DirectoryInfo(lp);
+                if (whole && IsLink(d)) return 0;
+                if (pattern != null)
+                {
+                    long t = 0;
+                    foreach (var f in Files(d, pattern)) { try { t += f.Length; } catch { } }
+                    return t;
+                }
+                return TreeSize(d, Cutoff(minAgeHours));
+            }
+            catch { return 0; }
+        }
+
+        public static long DeletePath(string path, string pattern, int minAgeHours, bool whole)
+        {
+            try
+            {
+                string lp = Long(path);
+                if (File.Exists(lp))
+                {
+                    var fi = new FileInfo(lp);
+                    long len = fi.Length;
+                    fi.Attributes = FileAttributes.Normal;
+                    fi.Delete();
+                    return len;
+                }
+                if (!Directory.Exists(lp)) return 0;
+                var d = new DirectoryInfo(lp);
+                if (whole && IsLink(d)) { Directory.Delete(lp, false); return 0; }
+                if (pattern != null)
+                {
+                    long t = 0;
+                    foreach (var f in Files(d, pattern))
+                    {
+                        try { long len = f.Length; f.Delete(); t += len; } catch { }
+                    }
+                    return t;
+                }
+                return DeleteTree(d, Cutoff(minAgeHours), whole);
+            }
+            catch { return 0; }
+        }
+    }
+
+    // ------------------------------------------------------------------ what to look for
+    static class Scanner
+    {
+        public static bool IsAdmin;
+
+        static string L { get { return Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData); } }
+        static string R { get { return Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData); } }
+        static string U { get { return Environment.GetFolderPath(Environment.SpecialFolder.UserProfile); } }
+        static string W { get { return Environment.GetFolderPath(Environment.SpecialFolder.Windows); } }
+        static string PD { get { return Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData); } }
+        static string LL { get { return Path.Combine(U, "AppData", "LocalLow"); } }
+
+        static string P(params string[] parts) { return Path.Combine(parts); }
+
+        static CleanItem Mk(string cat, string name, string info, Safety s, bool admin, params string[] paths)
+        {
+            var it = new CleanItem { Category = cat, Name = name, Info = info, Safety = s, NeedsAdmin = admin };
+            it.Paths.AddRange(paths.Where(p => !string.IsNullOrEmpty(p)).Select(p => p.StartsWith(@"\\?\") ? p.Substring(4) : p));
+            return it;
+        }
+
+        static void Add(List<CleanItem> l, CleanItem it, params string[] procs)
+        {
+            it.Processes = procs;
+            if (it.Paths.Any(Fs.Exists)) l.Add(it);
+        }
+
+        public const string CatWin = "Windows & temp files";
+        public const string CatGpu = "Graphics caches";
+        public const string CatDev = "Developer caches";
+        public const string CatWeb = "Browser caches";
+        public const string CatApp = "App caches";
+        public const string CatOld = "Old program versions";
+
+        public static List<CleanItem> Build()
+        {
+            var l = new List<CleanItem>();
+            string root = Native.SysRoot;
+
+            // --- Windows
+            var rb = new CleanItem { Category = CatWin, Name = "Recycle Bin", Info = "Files you already deleted.", Mode = Mode.RecycleBin };
+            l.Add(rb);
+
+            var tmp = Mk(CatWin, "Your temporary files", "Leftovers from installers and apps. Files changed in the last 24 h are kept.",
+                Safety.Safe, false, Path.GetTempPath().TrimEnd('\\'));
+            tmp.MinAgeHours = 24; Add(l, tmp);
+
+            var wtmp = Mk(CatWin, "Windows temporary files", "System temp folder. Files changed in the last 24 h are kept.",
+                Safety.Safe, true, P(W, "Temp"));
+            wtmp.MinAgeHours = 24; Add(l, wtmp);
+
+            Add(l, Mk(CatWin, "Windows Update downloads", "Already-installed update packages.", Safety.Safe, true,
+                P(W, "SoftwareDistribution", "Download")));
+            Add(l, Mk(CatWin, "Delivery Optimization cache", "Update pieces Windows shares with other PCs.", Safety.Safe, true,
+                P(W, "ServiceProfiles", "NetworkService", "AppData", "Local", "Microsoft", "Windows", "DeliveryOptimization", "Cache")));
+            Add(l, Mk(CatWin, "Crash dumps (yours)", "Memory dumps from crashed apps.", Safety.Safe, false, P(L, "CrashDumps")));
+            Add(l, Mk(CatWin, "Crash dumps (system)", "Memory dumps from Windows crashes (blue screens).", Safety.Safe, true,
+                P(W, "Minidump"), P(W, "MEMORY.DMP"), P(W, "LiveKernelReports")));
+            Add(l, Mk(CatWin, "Error reports", "Windows Error Reporting files.", Safety.Safe, false, P(L, "Microsoft", "Windows", "WER")));
+            Add(l, Mk(CatWin, "Error reports (system)", "Windows Error Reporting files for all users.", Safety.Safe, true,
+                P(PD, "Microsoft", "Windows", "WER", "ReportArchive"), P(PD, "Microsoft", "Windows", "WER", "ReportQueue")));
+            var thumbs = Mk(CatWin, "Thumbnail cache", "Picture previews in Explorer. Rebuilt when you open folders. Some files may be in use.",
+                Safety.Safe, false, P(L, "Microsoft", "Windows", "Explorer"));
+            thumbs.Pattern = "thumbcache_*.db"; Add(l, thumbs);
+
+            string hib = P(root, "hiberfil.sys");
+            if (Fs.Exists(hib))
+            {
+                var h = Mk(CatWin, "Hibernation file", "Turns off hibernation and Fast Startup. Boot may be a bit slower. Undo any time: powercfg /h on",
+                    Safety.Review, true, hib);
+                h.Mode = Mode.Command; h.Cmd = P(Environment.SystemDirectory, "powercfg.exe"); h.CmdArgs = "/hibernate off";
+                l.Add(h);
+            }
+            var dism = Mk(CatWin, "Old Windows component versions (WinSxS)", "Runs Windows' own cleanup (DISM). Takes a few minutes. Size is only known afterwards.",
+                Safety.Safe, true);
+            dism.Mode = Mode.Command; dism.Cmd = P(Environment.SystemDirectory, "Dism.exe"); dism.CmdArgs = "/Online /Cleanup-Image /StartComponentCleanup";
+            l.Add(dism);
+
+            // --- GPU
+            Add(l, Mk(CatGpu, "NVIDIA shader cache", "Saved game graphics data. Games may stutter briefly the first time after cleaning.", Safety.Safe, false,
+                P(L, "NVIDIA", "DXCache"), P(L, "NVIDIA", "GLCache"), P(LL, "NVIDIA", "PerDriverVersion", "DXCache"), P(LL, "NVIDIA", "PerDriverVersion", "GLCache")));
+            Add(l, Mk(CatGpu, "AMD shader cache", "Saved game graphics data. Games may stutter briefly the first time after cleaning.", Safety.Safe, false,
+                P(L, "AMD", "DxCache"), P(L, "AMD", "DxcCache"), P(L, "AMD", "GLCache"), P(L, "AMD", "VkCache")));
+            Add(l, Mk(CatGpu, "Intel shader cache", "Saved graphics data.", Safety.Safe, false, P(L, "Intel", "ShaderCache"), P(LL, "Intel", "ShaderCache")));
+            Add(l, Mk(CatGpu, "DirectX shader cache", "Saved graphics data. Rebuilds automatically.", Safety.Safe, false, P(L, "D3DSCache")));
+            Add(l, Mk(CatGpu, "Old NVIDIA driver downloads", "Driver installers the NVIDIA App already used.", Safety.Review, true,
+                P(PD, "NVIDIA Corporation", "NVIDIA App", "UpdateFramework", "ota-artifacts"), P(PD, "NVIDIA Corporation", "Downloader")));
+
+            // --- developer
+            Add(l, Mk(CatDev, "npm cache", "Downloaded npm packages. Next install downloads them again.", Safety.Safe, false,
+                P(L, "npm-cache", "_cacache"), P(L, "npm-cache", "_npx")), "node");
+            Add(l, Mk(CatDev, "pnpm store", "Shared pnpm package store. Existing projects keep working.", Safety.Safe, false,
+                P(L, "pnpm", "store"), P(L, "pnpm-cache")), "node");
+            Add(l, Mk(CatDev, "Yarn cache", "Downloaded Yarn packages.", Safety.Safe, false, P(L, "Yarn", "Cache")));
+            Add(l, Mk(CatDev, "Bun cache", "Downloaded Bun packages.", Safety.Safe, false, P(U, ".bun", "install", "cache")));
+            Add(l, Mk(CatDev, "pip cache", "Downloaded Python packages.", Safety.Safe, false, P(L, "pip", "Cache")));
+            Add(l, Mk(CatDev, "NuGet HTTP cache", "Downloaded .NET package data.", Safety.Safe, false,
+                P(L, "NuGet", "v3-cache"), P(L, "NuGet", "plugins-cache"), P(L, "NuGet", "Cache")));
+            Add(l, Mk(CatDev, "NuGet packages folder", ".NET packages. Restored again on next build (download needed).", Safety.Review, false,
+                P(U, ".nuget", "packages")));
+            Add(l, Mk(CatDev, "Gradle caches", "Android/Java build caches. Next build downloads again.", Safety.Review, false, P(U, ".gradle", "caches")));
+            Add(l, Mk(CatDev, "Go build cache", "Compiled Go build outputs.", Safety.Safe, false, P(L, "go-build")));
+            Add(l, Mk(CatDev, "Cargo download cache", "Downloaded Rust crates.", Safety.Safe, false, P(U, ".cargo", "registry", "cache")));
+            Add(l, Mk(CatDev, "Playwright browsers", "Test browsers. Re-download with: npx playwright install", Safety.Review, false, P(L, "ms-playwright")));
+
+            // --- browsers
+            Chromium(l, "Google Chrome", P(L, "Google", "Chrome", "User Data"), "chrome");
+            Chromium(l, "Microsoft Edge", P(L, "Microsoft", "Edge", "User Data"), "msedge");
+            Chromium(l, "Brave", P(L, "BraveSoftware", "Brave-Browser", "User Data"), "brave");
+            Chromium(l, "Vivaldi", P(L, "Vivaldi", "User Data"), "vivaldi");
+            var opera = new List<string>();
+            foreach (var d in Fs.Dirs(P(L, "Opera Software")))
+            {
+                opera.Add(P(d.FullName, "Cache")); opera.Add(P(d.FullName, "Code Cache")); opera.Add(P(d.FullName, "GPUCache"));
+            }
+            foreach (var d in Fs.Dirs(P(R, "Opera Software")))
+            {
+                opera.Add(P(d.FullName, "Code Cache")); opera.Add(P(d.FullName, "GPUCache")); opera.Add(P(d.FullName, "ShaderCache"));
+            }
+            Add(l, Mk(CatWeb, "Opera cache", "Web page cache. You stay logged in.", Safety.Safe, false, opera.ToArray()), "opera");
+            var ff = new List<string>();
+            foreach (var d in Fs.Dirs(P(L, "Mozilla", "Firefox", "Profiles"))) ff.Add(P(d.FullName, "cache2"));
+            Add(l, Mk(CatWeb, "Firefox cache", "Web page cache. You stay logged in.", Safety.Safe, false, ff.ToArray()), "firefox");
+
+            // --- apps
+            Electron(l, "VS Code", P(R, "Code"), "Code");
+            Electron(l, "Cursor", P(R, "Cursor"), "Cursor");
+            Electron(l, "Windsurf", P(R, "Windsurf"), "Windsurf");
+            Electron(l, "Discord", P(R, "discord"), "Discord");
+            Electron(l, "Slack", P(R, "Slack"), "slack");
+            Electron(l, "Figma", P(R, "Figma"), "Figma");
+            Electron(l, "Postman", P(R, "Postman"), "Postman");
+            Electron(l, "ClickUp", P(R, "ClickUp"), "ClickUp");
+            Add(l, Mk(CatApp, "Spotify cache", "Cached songs. They stream again when played.", Safety.Safe, false,
+                P(L, "Spotify", "Storage"), P(L, "Spotify", "Data")), "Spotify");
+            Add(l, Mk(CatApp, "Steam web cache", "Store page cache.", Safety.Safe, false, P(L, "Steam", "htmlcache")), "steam");
+            Add(l, Mk(CatApp, "Telegram cache", "Downloaded media cache. Chats stay.", Safety.Safe, false,
+                P(R, "Telegram Desktop", "tdata", "user_data"), P(R, "Telegram Desktop", "tdata", "emoji")), "Telegram");
+
+            // --- old versions
+            OldJetBrains(l);
+
+            return l;
+        }
+
+        static void Chromium(List<CleanItem> l, string name, string userData, string proc)
+        {
+            if (!Fs.Exists(userData)) return;
+            var paths = new List<string>();
+            foreach (var prof in Fs.Dirs(userData))
+            {
+                if (!File.Exists(P(prof.FullName, "Preferences"))) continue;
+                paths.Add(P(prof.FullName, "Cache"));
+                paths.Add(P(prof.FullName, "Code Cache"));
+                paths.Add(P(prof.FullName, "GPUCache"));
+            }
+            paths.Add(P(userData, "ShaderCache"));
+            paths.Add(P(userData, "GrShaderCache"));
+            paths.Add(P(userData, "GraphiteDawnCache"));
+            Add(l, Mk(CatWeb, name + " cache", "Web page cache. You stay logged in. Close the browser first for best results.",
+                Safety.Safe, false, paths.ToArray()), proc);
+        }
+
+        static void Electron(List<CleanItem> l, string name, string dir, string proc)
+        {
+            if (!Fs.Exists(dir)) return;
+            Add(l, Mk(CatApp, name + " cache", "App cache. Rebuilds automatically. Settings and data stay.", Safety.Safe, false,
+                P(dir, "Cache"), P(dir, "Code Cache"), P(dir, "GPUCache"), P(dir, "CachedData"), P(dir, "CachedExtensionVSIXs"),
+                P(dir, "DawnCache"), P(dir, "DawnGraphiteCache"), P(dir, "DawnWebGPUCache")), proc);
+        }
+
+        // JetBrains keeps one folder per version (WebStorm2025.3, WebStorm2026.1, ...). Keep the newest.
+        static void OldJetBrains(List<CleanItem> l)
+        {
+            var rx = new Regex(@"^([A-Za-z]+)(\d{4})\.(\d+)$");
+            var found = new List<Tuple<string, int, DirectoryInfo, bool>>(); // product, version, dir, isRoaming
+            foreach (var b in new[] { Tuple.Create(P(L, "JetBrains"), false), Tuple.Create(P(R, "JetBrains"), true) })
+            {
+                foreach (var d in Fs.Dirs(b.Item1))
+                {
+                    var m = rx.Match(d.Name);
+                    if (!m.Success) continue;
+                    int ver = int.Parse(m.Groups[2].Value) * 100 + int.Parse(m.Groups[3].Value);
+                    found.Add(Tuple.Create(m.Groups[1].Value, ver, d, b.Item2));
+                }
+            }
+            string pf = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+            foreach (var g in found.GroupBy(f => f.Item1))
+            {
+                int newest = g.Max(f => f.Item2);
+                foreach (var f in g.Where(x => x.Item2 != newest))
+                {
+                    string ver = (f.Item2 / 100) + "." + (f.Item2 % 100);
+                    // Still installed? Then leave it alone.
+                    bool installed = Fs.Dirs(P(pf, "JetBrains")).Any(d => d.Name.StartsWith(f.Item1 + " " + ver, StringComparison.OrdinalIgnoreCase));
+                    if (installed) continue;
+                    var it = Mk(CatOld, f.Item1 + " " + ver + (f.Item4 ? " - settings & plugins" : " - caches & logs"),
+                        "You use a newer version (" + (newest / 100) + "." + (newest % 100) + "). Its settings were already imported.",
+                        f.Item4 ? Safety.Review : Safety.Safe, false, f.Item3.FullName.Replace(@"\\?\", ""));
+                    it.Mode = Mode.Whole;
+                    Add(l, it);
+                }
+            }
+        }
+
+        public static long SizeOf(CleanItem it)
+        {
+            if (it.Mode == Mode.RecycleBin) return Native.RecycleSize();
+            if (it.Mode == Mode.Command && it.Paths.Count == 0) return -1;
+            long t = 0;
+            foreach (var p in it.Paths) t += Fs.PathSize(p, it.Pattern, it.MinAgeHours, it.Mode == Mode.Whole);
+            // Without admin rights we often can't look inside system folders.
+            if (t == 0 && it.NeedsAdmin && !IsAdmin) return -1;
+            return t;
+        }
+
+        public static List<CleanItem> ScanAll(IProgress<string> p)
+        {
+            var list = Build();
+            foreach (var it in list)
+            {
+                if (p != null) p.Report("Measuring: " + it.Name);
+                it.Size = SizeOf(it);
+            }
+            return list;
+        }
+
+        // ---- project node_modules finder
+        static readonly HashSet<string> SkipDirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ".git", "Windows", "Program Files", "Program Files (x86)", "ProgramData", "AppData",
+            "$Recycle.Bin", "System Volume Information", "$WinREAgent", "Recovery"
+        };
+
+        public static List<CleanItem> FindProjects(string root, IProgress<string> p)
+        {
+            var found = new List<DirectoryInfo>();
+            Walk(new DirectoryInfo(Fs.Long(root.TrimEnd('\\'))), found, 0, p);
+            var res = new List<CleanItem>();
+            string cat = "Project node_modules";
+            foreach (var nm in found)
+            {
+                string full = nm.FullName.Replace(@"\\?\", "");
+                string proj = Path.GetDirectoryName(full);
+                string rel = proj.Length > root.TrimEnd('\\').Length ? proj.Substring(root.TrimEnd('\\').Length).TrimStart('\\') : Path.GetFileName(proj);
+                DateTime changed = nm.Parent.LastWriteTime;
+                try { var pj = new FileInfo(Fs.Long(Path.Combine(proj, "package.json"))); if (pj.Exists) changed = pj.LastWriteTime; } catch { }
+                var it = new CleanItem
+                {
+                    Category = cat, Name = rel, Mode = Mode.Whole, Safety = Safety.Review,
+                    Info = "In " + root + ". Project last changed " + changed.ToString("yyyy-MM-dd") + ". Your code stays; run npm install to get it back."
+                };
+                it.Paths.Add(full);
+                if (p != null) p.Report("Measuring: " + rel);
+                it.Size = SizeOf(it);
+                res.Add(it);
+            }
+            return res;
+        }
+
+        static void Walk(DirectoryInfo d, List<DirectoryInfo> found, int depth, IProgress<string> p)
+        {
+            if (depth > 10) return;
+            DirectoryInfo[] subs;
+            try { subs = d.GetDirectories(); } catch { return; }
+            if (p != null && depth <= 2) p.Report("Looking in: " + d.FullName.Replace(@"\\?\", ""));
+            foreach (var s in subs)
+            {
+                try
+                {
+                    if (Fs.IsLink(s) || SkipDirs.Contains(s.Name)) continue;
+                    if (s.Name.Equals("node_modules", StringComparison.OrdinalIgnoreCase)) { found.Add(s); continue; }
+                    Walk(s, found, depth + 1, p);
+                }
+                catch { }
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------ deleting
+    static class Cleaner
+    {
+        public static long Clean(CleanItem it)
+        {
+            switch (it.Mode)
+            {
+                case Mode.RecycleBin:
+                    {
+                        long before = Native.RecycleSize();
+                        Native.EmptyRecycle();
+                        return Math.Max(0, before - Native.RecycleSize());
+                    }
+                case Mode.Command:
+                    {
+                        long before = Native.FreeBytes();
+                        RunHidden(it.Cmd, it.CmdArgs);
+                        return Math.Max(0, Native.FreeBytes() - before);
+                    }
+                default:
+                    {
+                        long freed = 0;
+                        foreach (var p in it.Paths) freed += Fs.DeletePath(p, it.Pattern, it.MinAgeHours, it.Mode == Mode.Whole);
+                        return freed;
+                    }
+            }
+        }
+
+        static void RunHidden(string file, string args)
+        {
+            var psi = new ProcessStartInfo(file, args)
+            {
+                CreateNoWindow = true, UseShellExecute = false,
+                RedirectStandardOutput = true, RedirectStandardError = true
+            };
+            using (var pr = Process.Start(psi))
+            {
+                pr.OutputDataReceived += (s, e) => { };
+                pr.ErrorDataReceived += (s, e) => { };
+                pr.BeginOutputReadLine(); pr.BeginErrorReadLine();
+                pr.WaitForExit();
+            }
+        }
+    }
+
+    static class Dev
+    {
+        public static int Report(string[] args)
+        {
+            Scanner.IsAdmin = Native.IsAdmin();
+            var sw = Stopwatch.StartNew();
+            var list = Scanner.ScanAll(null);
+            if (args.Length >= 3) list.AddRange(Scanner.FindProjects(args[2], null));
+            var sb = new StringBuilder();
+            sb.AppendLine("admin=" + Scanner.IsAdmin + " seconds=" + sw.Elapsed.TotalSeconds.ToString("0"));
+            foreach (var it in list)
+                sb.AppendLine(string.Join("\t", it.Category, it.Name, Util.Fmt(it.Size), it.Safety.ToString(),
+                    it.NeedsAdmin ? "admin" : "-", string.Join(" | ", it.Paths.Where(Fs.Exists))));
+            File.WriteAllText(args[1], sb.ToString());
+            return 0;
+        }
+
+        public static int SelfTest(string dir)
+        {
+            var log = new StringBuilder();
+            bool ok = true;
+            try
+            {
+                string fx = Path.Combine(dir, "fixture");
+                string keep = Path.Combine(dir, "keep-target");
+                Directory.CreateDirectory(keep);
+                File.WriteAllText(Path.Combine(keep, "important.txt"), "must survive");
+
+                // deep path > 260 chars
+                string deep = fx;
+                for (int i = 0; i < 12; i++) deep = Path.Combine(deep, "node_modules_level_" + i + "_xxxxxxxxxx");
+                Directory.CreateDirectory(Fs.Long(deep));
+                File.WriteAllText(Fs.Long(Path.Combine(deep, "deep.txt")), new string('a', 1000));
+                log.AppendLine("deep path length: " + deep.Length);
+
+                string ro = Path.Combine(fx, "readonly.txt");
+                File.WriteAllText(ro, new string('b', 2000));
+                File.SetAttributes(ro, FileAttributes.ReadOnly);
+
+                // junction pointing outside the fixture
+                var mk = Process.Start(new ProcessStartInfo("cmd.exe", "/c mklink /J \"" + Path.Combine(fx, "link") + "\" \"" + keep + "\"")
+                { CreateNoWindow = true, UseShellExecute = false });
+                mk.WaitForExit();
+
+                var probe = new CleanItem { Mode = Mode.Whole };
+                probe.Paths.Add(fx);
+                long size = Scanner.SizeOf(probe);
+                log.AppendLine("measured: " + size + " (expect 3000, junction not followed)");
+                if (size != 3000) ok = false;
+
+                long freed = Cleaner.Clean(probe);
+                log.AppendLine("freed: " + freed);
+                bool fxGone = !Directory.Exists(Fs.Long(fx));
+                bool keepOk = File.Exists(Path.Combine(keep, "important.txt"));
+                log.AppendLine("fixture removed: " + fxGone);
+                log.AppendLine("junction target intact: " + keepOk);
+                if (!fxGone || !keepOk || freed != 3000) ok = false;
+            }
+            catch (Exception ex) { ok = false; log.AppendLine("ERROR: " + ex); }
+            log.AppendLine(ok ? "SELFTEST PASS" : "SELFTEST FAIL");
+            File.WriteAllText(Path.Combine(dir, "selftest.txt"), log.ToString());
+            return ok ? 0 : 1;
+        }
+    }
+}
