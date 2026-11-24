@@ -713,7 +713,13 @@
             <!-- Space map -->
             <DockPanel x:Name="MapPanel" Grid.Row="1">
               <Grid DockPanel.Dock="Top" Margin="0,0,0,10">
-                <StackPanel Orientation="Horizontal">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="*"/>
+                  <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock x:Name="MapPath" VerticalAlignment="Center" FontWeight="SemiBold" FontSize="15"
+                           TextTrimming="CharacterEllipsis" Margin="2,0,14,0"/>
+                <StackPanel Grid.Column="1" Orientation="Horizontal">
                   <Button x:Name="MapUp" Style="{StaticResource Secondary}" Margin="0,0,8,0" ToolTip="Up one level" AutomationProperties.Name="Up one level">
                     <StackPanel Orientation="Horizontal">
                       <TextBlock Text="&#xE74A;" Style="{StaticResource Glyph}" Margin="0,0,6,0"/>
@@ -721,10 +727,8 @@
                     </StackPanel>
                   </Button>
                   <Button x:Name="MapPick" Style="{StaticResource Secondary}" Content="Choose folder…" Margin="0,0,8,0"/>
-                  <Button x:Name="MapOpen" Style="{StaticResource Secondary}" Content="Open in Explorer" Margin="0,0,14,0"/>
+                  <Button x:Name="MapOpen" Style="{StaticResource Secondary}" Content="Open in Explorer"/>
                 </StackPanel>
-                <TextBlock x:Name="MapPath" HorizontalAlignment="Right" VerticalAlignment="Center" FontWeight="SemiBold"
-                           TextTrimming="CharacterEllipsis" MaxWidth="380"/>
               </Grid>
               <TextBlock x:Name="MapStatus" DockPanel.Dock="Bottom" Style="{StaticResource Caption}" Margin="0,8,0,0" TextTrimming="CharacterEllipsis"/>
               <Border x:Name="MapHost" Background="{DynamicResource Surface}" CornerRadius="10" BorderBrush="{DynamicResource Line}" BorderThickness="1" ClipToBounds="True">
