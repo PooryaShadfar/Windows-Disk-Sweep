@@ -18,9 +18,9 @@ using System.Threading.Tasks;
 [assembly: System.Reflection.AssemblyDescription("Find and remove junk files on Windows. You choose what goes.")]
 [assembly: System.Reflection.AssemblyProduct("Disk Sweep")]
 [assembly: System.Reflection.AssemblyCopyright("Copyright (c) 2026 Poorya Shadfar. MIT License.")]
-[assembly: System.Reflection.AssemblyVersion("1.3.2.0")]
-[assembly: System.Reflection.AssemblyFileVersion("1.3.2.0")]
-[assembly: System.Reflection.AssemblyInformationalVersion("1.3.2")]
+[assembly: System.Reflection.AssemblyVersion("1.3.3.0")]
+[assembly: System.Reflection.AssemblyFileVersion("1.3.3.0")]
+[assembly: System.Reflection.AssemblyInformationalVersion("1.3.3")]
 
 namespace DiskSweep
 {
