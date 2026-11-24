@@ -119,6 +119,22 @@ namespace DiskSweep
             setup.Mode = Mode.Command; setup.Cmd = "sagerun";
             setup.CmdArgs = "Temporary Setup Files|Windows ESD installation files|Windows Upgrade Log Files|Setup Log Files";
             if (setup.Paths.Any(Fs.Exists)) l.Add(setup);
+
+            // System Restore points: keep the newest, remove older ones.
+            var vss = Mk(CatWin, "Old System Restore points", "Keeps your newest restore point and removes older ones. Set a size limit in Tools > System.",
+                Safety.Review, true);
+            vss.Mode = Mode.Command; vss.Cmd = "vss-old"; vss.CmdArgs = root; vss.Size = -1;
+            if (IsAdmin)
+            {
+                var info = SystemSpace.Restore(root);
+                if (info.Available && info.Count > 1)
+                {
+                    vss.Name = "Old System Restore points (" + (info.Count - 1) + " of " + info.Count + ")";
+                    vss.Info = "Restore points use " + Util.Fmt(info.Used) + " in total. Keeps the newest one and removes the rest. Set a size limit in Tools > System.";
+                    l.Add(vss);
+                }
+            }
+            else l.Add(vss);
         }
 
         // ================================================================ WSL and Docker

@@ -242,6 +242,7 @@ namespace DiskSweep
                     ".  Goes to the Recycle Bin, so you can restore it.", Safety.Review, false, full);
                 it.Mode = Mode.Whole;
                 it.ToRecycleBin = true;
+                it.AlwaysRecycle = true;
                 it.Size = f.Length;
                 res.Add(it);
             }

@@ -141,9 +141,10 @@ namespace DiskSweep
         void OpenTools()
         {
             toolsOverlay.Visibility = Visibility.Visible;
-            if (toolMap.IsChecked != true && toolApps.IsChecked != true && toolMove.IsChecked != true && toolCompress.IsChecked != true)
-                toolMap.IsChecked = true;
-            else ShowTool(toolMap.IsChecked == true ? "map" : toolApps.IsChecked == true ? "apps" : toolMove.IsChecked == true ? "move" : "compress");
+            var tabs = new[] { Tuple.Create(toolMap, "map"), Tuple.Create(toolApps, "apps"), Tuple.Create(toolMove, "move"), Tuple.Create(toolCompress, "compress"),
+                               Tuple.Create(toolGrowth, "growth"), Tuple.Create(toolSystem, "system"), Tuple.Create(toolActivity, "activity") };
+            var current = tabs.FirstOrDefault(x => x.Item1.IsChecked == true);
+            if (current == null) toolMap.IsChecked = true; else ShowTool(current.Item2);
         }
 
         void CloseTools()
@@ -159,6 +160,9 @@ namespace DiskSweep
             appsPanel.Visibility = which == "apps" ? Visibility.Visible : Visibility.Collapsed;
             movePanel.Visibility = which == "move" ? Visibility.Visible : Visibility.Collapsed;
             compressPanel.Visibility = which == "compress" ? Visibility.Visible : Visibility.Collapsed;
+            growthPanel.Visibility = which == "growth" ? Visibility.Visible : Visibility.Collapsed;
+            systemPanel.Visibility = which == "system" ? Visibility.Visible : Visibility.Collapsed;
+            activityPanel.Visibility = which == "activity" ? Visibility.Visible : Visibility.Collapsed;
             switch (which)
             {
                 case "map":
@@ -177,6 +181,21 @@ namespace DiskSweep
                     toolSub.Text = "Frees space on this drive. Apps keep finding the folder through a link.";
                     RefreshMoveDrives();
                     UpdateMove();
+                    break;
+                case "growth":
+                    toolTitle.Text = "What grew?";
+                    toolSub.Text = "Folders on " + Native.SysRoot.TrimEnd('\\') + " that grew the most, from daily snapshots of folder sizes.";
+                    ShowGrowth();
+                    break;
+                case "system":
+                    toolTitle.Text = "System space";
+                    toolSub.Text = "System Restore points and the space Windows reserves for updates.";
+                    LoadSystem();
+                    break;
+                case "activity":
+                    toolTitle.Text = "Activity";
+                    toolSub.Text = "Everything Disk Sweep removed, moved or compressed. Items in the Recycle Bin can be restored.";
+                    ShowActivity();
                     break;
                 case "compress":
                     toolTitle.Text = "Compress instead of delete";
@@ -203,6 +222,7 @@ namespace DiskSweep
                 var prog = new Progress<string>(s => { if (!cts.IsCancellationRequested) mapStatus.Text = s; });
                 var tree = await Task.Run(() => SpaceMap.Build(root, prog, cts.Token));
                 mapCache[root] = tree;
+                if (root.Equals(Native.SysRoot, StringComparison.OrdinalIgnoreCase)) { var tr = tree; await Task.Run(() => Growth.Save(root, tr)); }
                 if (cts.IsCancellationRequested) return;
                 mapBuilding = false;
                 mapNode = tree;
@@ -347,6 +367,7 @@ namespace DiskSweep
                 err = await Task.Run(() => Mover.Move(src, dst, prog));
                 long freed = Math.Max(0, Native.FreeBytes(Path.GetPathRoot(src)) - before);
                 moveStatus.Text = err == null ? "Done. Freed " + Util.Fmt(freed) + " on " + Path.GetPathRoot(src).TrimEnd('\\') + "." : "";
+                if (err == null) Activity.Add("moved", src + "  →  " + Mover.TargetFor(src, dst), freed);
                 if (err == null && freed > 0) { Settings.History.Add(new HistoryEntry { When = DateTime.Now, Bytes = freed, Items = 1 }); Settings.Save(); }
             }
             catch (Exception ex) { err = ex.Message; }
@@ -381,6 +402,7 @@ namespace DiskSweep
             long saved = 0;
             try { saved = await Task.Run(() => Compressor.EnableCompactOs()); }
             finally { toolBusy = false; cleaning = false; }
+            Activity.Add("compressed", "Windows system files (CompactOS)", saved);
             if (saved > 0) { Settings.History.Add(new HistoryEntry { When = DateTime.Now, Bytes = saved, Items = 1 }); Settings.Save(); }
             await ShowDialog("Windows compressed", "Saved " + Util.Fmt(saved) + ".", null, null, "OK", null, false, false, null);
             LoadCompactOs();
@@ -400,6 +422,7 @@ namespace DiskSweep
             try { saved = await Task.Run(() => Compressor.CompressFolder(f)); }
             finally { toolBusy = false; cleaning = false; }
             compStatus.Text = "Saved " + Util.Fmt(saved) + ".";
+            Activity.Add("compressed", f, saved);
             if (saved > 0) { Settings.History.Add(new HistoryEntry { When = DateTime.Now, Bytes = saved, Items = 1 }); Settings.Save(); }
         }
     }

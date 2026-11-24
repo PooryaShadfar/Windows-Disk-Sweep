@@ -691,6 +691,24 @@
                   <TextBlock Text="Compress"/>
                 </StackPanel>
               </RadioButton>
+              <RadioButton x:Name="ToolGrowth" AutomationProperties.Name="What grew" Style="{StaticResource NavRadio}" GroupName="tools">
+                <StackPanel Orientation="Horizontal">
+                  <TextBlock Text="&#xE9D2;" Style="{StaticResource Glyph}" Width="28" Foreground="{DynamicResource Muted}"/>
+                  <TextBlock Text="What grew?"/>
+                </StackPanel>
+              </RadioButton>
+              <RadioButton x:Name="ToolSystem" AutomationProperties.Name="System" Style="{StaticResource NavRadio}" GroupName="tools">
+                <StackPanel Orientation="Horizontal">
+                  <TextBlock Text="&#xE770;" Style="{StaticResource Glyph}" Width="28" Foreground="{DynamicResource Muted}"/>
+                  <TextBlock Text="System"/>
+                </StackPanel>
+              </RadioButton>
+              <RadioButton x:Name="ToolActivity" AutomationProperties.Name="Activity" Style="{StaticResource NavRadio}" GroupName="tools">
+                <StackPanel Orientation="Horizontal">
+                  <TextBlock Text="&#xE81C;" Style="{StaticResource Glyph}" Width="28" Foreground="{DynamicResource Muted}"/>
+                  <TextBlock Text="Activity"/>
+                </StackPanel>
+              </RadioButton>
             </StackPanel>
           </Border>
 
@@ -884,6 +902,151 @@
                 </Border>
               </StackPanel>
             </ScrollViewer>
+
+            <!-- What grew? -->
+            <DockPanel x:Name="GrowthPanel" Grid.Row="1" Visibility="Collapsed">
+              <Grid DockPanel.Dock="Top" Margin="0,0,0,10">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="*"/>
+                  <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock x:Name="GrowthSummary" FontWeight="SemiBold" VerticalAlignment="Center" TextWrapping="Wrap" Margin="2,0,14,0"/>
+                <StackPanel Grid.Column="1" Orientation="Horizontal">
+                  <RadioButton x:Name="GrowRange1" Style="{StaticResource Chip}" GroupName="range" Content="Last snapshot" AutomationProperties.Name="Since the last snapshot"/>
+                  <RadioButton x:Name="GrowRange7" Style="{StaticResource Chip}" GroupName="range" Content="7 days" IsChecked="True" AutomationProperties.Name="Last 7 days"/>
+                  <RadioButton x:Name="GrowRange30" Style="{StaticResource Chip}" GroupName="range" Content="30 days" AutomationProperties.Name="Last 30 days"/>
+                  <Button x:Name="GrowSnap" Style="{StaticResource Secondary}" Margin="12,0,0,0" Content="Take snapshot now"/>
+                </StackPanel>
+              </Grid>
+              <TextBlock x:Name="GrowthStatus" DockPanel.Dock="Bottom" Style="{StaticResource Caption}" Margin="0,8,0,0" TextWrapping="Wrap"/>
+              <Border Background="{DynamicResource Surface}" CornerRadius="10" BorderBrush="{DynamicResource Line}" BorderThickness="1" Padding="6,4,2,4">
+                <Grid>
+                  <ListBox x:Name="GrowthList" Background="Transparent" BorderThickness="0" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                           ScrollViewer.CanContentScroll="False" Foreground="{DynamicResource Text}" AutomationProperties.Name="Folders that grew">
+                    <ListBox.ItemContainerStyle>
+                      <Style TargetType="ListBoxItem">
+                        <Setter Property="Focusable" Value="False"/>
+                        <Setter Property="Template">
+                          <Setter.Value>
+                            <ControlTemplate TargetType="ListBoxItem"><ContentPresenter/></ControlTemplate>
+                          </Setter.Value>
+                        </Setter>
+                      </Style>
+                    </ListBox.ItemContainerStyle>
+                    <ListBox.ItemTemplate>
+                      <DataTemplate>
+                        <Border Padding="12,9" Margin="0,1,6,1">
+                          <Grid>
+                            <Grid.ColumnDefinitions>
+                              <ColumnDefinition Width="*"/>
+                              <ColumnDefinition Width="130"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel>
+                              <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                              <TextBlock Text="{Binding Sub}" Style="{StaticResource Caption}" TextTrimming="CharacterEllipsis" Margin="0,2,0,0"/>
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                              <TextBlock Text="{Binding ChangeText}" FontFamily="{StaticResource Display}" FontSize="16" FontWeight="SemiBold"
+                                         Foreground="{DynamicResource WarnFg}" HorizontalAlignment="Right"/>
+                              <ProgressBar Style="{StaticResource Bar}" Height="4" Maximum="100" Value="{Binding Share, Mode=OneWay}" Margin="20,5,0,0"/>
+                            </StackPanel>
+                          </Grid>
+                        </Border>
+                      </DataTemplate>
+                    </ListBox.ItemTemplate>
+                  </ListBox>
+                  <TextBlock x:Name="GrowthEmpty" Style="{StaticResource Caption}" TextWrapping="Wrap" TextAlignment="Center"
+                             HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="460" Visibility="Collapsed"/>
+                </Grid>
+              </Border>
+            </DockPanel>
+
+            <!-- System -->
+            <ScrollViewer x:Name="SystemPanel" Grid.Row="1" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
+              <StackPanel MaxWidth="720" HorizontalAlignment="Left">
+                <TextBlock x:Name="SystemAdminNote" Foreground="{DynamicResource WarnFg}" TextWrapping="Wrap" Margin="0,0,0,12"
+                           Text="These settings need administrator rights. Click the shield button at the top to restart Disk Sweep as administrator."/>
+                <Border Style="{StaticResource Card}">
+                  <StackPanel>
+                    <TextBlock Text="System Restore points" FontWeight="SemiBold" FontSize="15"/>
+                    <TextBlock Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,4,0,0"
+                               Text="Windows saves restore points before updates and installs. Old ones can use many gigabytes. Removing old points keeps the newest, so you can still go back to it."/>
+                    <TextBlock x:Name="RestoreText" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,12,0,0"/>
+                    <Button x:Name="RestoreDelete" Style="{StaticResource Primary}" HorizontalAlignment="Left" Margin="0,12,0,0" Content="Remove old restore points"/>
+                    <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
+                      <TextBlock Text="Let restore points use at most" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                      <TextBox x:Name="RestoreLimit" Style="{StaticResource Field}" Width="54" TextAlignment="Right" MaxLength="2" Text="5"
+                               AutomationProperties.Name="Restore point limit in percent"/>
+                      <TextBlock Text="% of the drive" VerticalAlignment="Center" Margin="8,0,12,0"/>
+                      <Button x:Name="RestoreLimitGo" Style="{StaticResource Secondary}" Content="Set limit"/>
+                    </StackPanel>
+                  </StackPanel>
+                </Border>
+                <Border Style="{StaticResource Card}" Margin="0,14,0,0">
+                  <StackPanel>
+                    <TextBlock Text="Reserved storage" FontWeight="SemiBold" FontSize="15"/>
+                    <TextBlock Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,4,0,0"
+                               Text="Windows keeps about 7 GB aside so updates always have room. Turning it off gives that space back; if a big update ever needs room, Windows asks you to free some first. Can be turned on again any time."/>
+                    <TextBlock x:Name="ReservedText" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,12,0,0"/>
+                    <Button x:Name="ReservedGo" Style="{StaticResource Primary}" HorizontalAlignment="Left" Margin="0,12,0,0" Content="Turn off reserved storage"/>
+                  </StackPanel>
+                </Border>
+                <TextBlock x:Name="SystemStatus" Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,12,0,0"/>
+              </StackPanel>
+            </ScrollViewer>
+
+            <!-- Activity -->
+            <DockPanel x:Name="ActivityPanel" Grid.Row="1" Visibility="Collapsed">
+              <Grid DockPanel.Dock="Top" Margin="0,0,0,10">
+                <TextBlock x:Name="ActivitySummary" FontWeight="SemiBold" VerticalAlignment="Center" Margin="2,0,0,0"/>
+                <Button x:Name="ActivityClear" Style="{StaticResource Subtle}" HorizontalAlignment="Right" Content="Clear log"/>
+              </Grid>
+              <Border Background="{DynamicResource Surface}" CornerRadius="10" BorderBrush="{DynamicResource Line}" BorderThickness="1" Padding="6,4,2,4">
+                <Grid>
+                  <ListBox x:Name="ActivityList" Background="Transparent" BorderThickness="0" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                           ScrollViewer.CanContentScroll="False" Foreground="{DynamicResource Text}" AutomationProperties.Name="Activity">
+                    <ListBox.ItemContainerStyle>
+                      <Style TargetType="ListBoxItem">
+                        <Setter Property="Focusable" Value="False"/>
+                        <Setter Property="Template">
+                          <Setter.Value>
+                            <ControlTemplate TargetType="ListBoxItem"><ContentPresenter/></ControlTemplate>
+                          </Setter.Value>
+                        </Setter>
+                      </Style>
+                    </ListBox.ItemContainerStyle>
+                    <ListBox.ItemTemplate>
+                      <DataTemplate>
+                        <Border Padding="12,9" Margin="0,1,6,1">
+                          <Grid>
+                            <Grid.ColumnDefinitions>
+                              <ColumnDefinition Width="*"/>
+                              <ColumnDefinition Width="100"/>
+                              <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel>
+                              <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" MaxWidth="460"/>
+                                <Border Style="{StaticResource Badge}" Background="{DynamicResource AdminBg}">
+                                  <TextBlock Text="{Binding KindText}" Foreground="{DynamicResource AdminFg}" FontSize="11.5" FontWeight="SemiBold"/>
+                                </Border>
+                              </StackPanel>
+                              <TextBlock Text="{Binding Sub}" Style="{StaticResource Caption}" TextTrimming="CharacterEllipsis" Margin="0,2,0,0"/>
+                            </StackPanel>
+                            <TextBlock Grid.Column="1" Text="{Binding SizeText}" FontFamily="{StaticResource Display}" FontSize="16" FontWeight="SemiBold"
+                                       HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                            <Button Grid.Column="2" Tag="restore" Style="{StaticResource Secondary}" Content="Restore" Margin="14,0,0,0"
+                                    VerticalAlignment="Center" Visibility="{Binding RestoreVis}" AutomationProperties.Name="{Binding Name}"/>
+                          </Grid>
+                        </Border>
+                      </DataTemplate>
+                    </ListBox.ItemTemplate>
+                  </ListBox>
+                  <TextBlock x:Name="ActivityEmpty" Style="{StaticResource Caption}" HorizontalAlignment="Center" VerticalAlignment="Center"
+                             Text="Nothing yet. Everything Disk Sweep removes, moves or compresses shows up here." Visibility="Collapsed"/>
+                </Grid>
+              </Border>
+            </DockPanel>
           </Grid>
         </Grid>
       </Border>
@@ -1035,6 +1198,16 @@
                 <TextBlock Text="GB" VerticalAlignment="Center" Margin="8,0,0,0"/>
               </StackPanel>
               <TextBlock x:Name="AlertStatus" Style="{StaticResource Caption}" Margin="0,8,0,0" TextWrapping="Wrap"/>
+
+              <TextBlock Text="Auto-clean" Style="{StaticResource Section}"/>
+              <CheckBox x:Name="OptAuto" Style="{StaticResource Switch}">
+                <StackPanel>
+                  <TextBlock Text="Clean &quot;Safe&quot; items automatically every week" FontWeight="SemiBold"/>
+                  <TextBlock Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,2,0,0"
+                             Text="Sundays at 12:00 via Task Scheduler. Only caches and temp files marked Safe, which rebuild by themselves. Never the Recycle Bin, large files, project folders, hidden items or anything marked Check first. You get a notification with what was freed, and it shows up in Tools > Activity."/>
+                </StackPanel>
+              </CheckBox>
+              <TextBlock x:Name="AutoStatus" Style="{StaticResource Caption}" Margin="0,8,0,0" TextWrapping="Wrap"/>
 
               <TextBlock Text="Developers" Style="{StaticResource Section}"/>
               <StackPanel Orientation="Horizontal">

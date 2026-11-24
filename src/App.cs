@@ -362,6 +362,7 @@ namespace DiskSweep
             WireDrives();
             WireHealth();
             WireTools();
+            WireTools2();
 
             view = new ListCollectionView(vms);
             view.GroupDescriptions.Add(new PropertyGroupDescription("Group"));
@@ -401,7 +402,7 @@ namespace DiskSweep
 
         T F<T>(string name) where T : class { return (T)Window.FindName(name); }
 
-        static string HideKey(CleanItem it)
+        internal static string HideKey(CleanItem it)
         {
             return it.Category + "|" + (it.Paths.Count > 0 ? it.Paths[0] : it.Name);
         }
@@ -634,6 +635,7 @@ namespace DiskSweep
             alertGB.Text = Settings.AlertGB.ToString();
             cacheDays.Text = Settings.CacheDays.ToString();
             projectDays.Text = Settings.ProjectDays.ToString();
+            FillAuto();
             alertStatus.Text = optAlert.IsChecked == true
                 ? "On. You'll get a notification if any drive drops below " + Settings.AlertGB + " GB free (at most once a day)."
                 : "Off.";
@@ -687,7 +689,7 @@ namespace DiskSweep
         void Rebuild()
         {
             foreach (var it in items)
-                it.ToRecycleBin = it.Category == Scanner.CatBig
+                it.ToRecycleBin = it.AlwaysRecycle || it.Category == Scanner.CatBig
                     || (Settings.RecycleReview && it.Safety == Safety.Review && (it.Mode == Mode.Whole || it.Mode == Mode.Contents));
             var all = items.Where(i => (i.Size < 0 || i.Size >= (1L << 20)) && !Settings.Hidden.ContainsKey(HideKey(i))).ToList();
             var cats = all.Select(i => i.Category).Distinct().ToList();
@@ -796,7 +798,7 @@ namespace DiskSweep
                         if (Directory.Exists(f)) r.AddRange(Scanner.FindProjectJunk(f, prog));
                     if (TestItemPath != null && Fs.Exists(TestItemPath))
                     {
-                        var t = new CleanItem { Category = "Test", Name = "Test folder", Info = TestItemPath, Mode = Mode.Whole, ToRecycleBin = TestRecycle };
+                        var t = new CleanItem { Category = "Test", Name = "Test folder", Info = TestItemPath, Mode = Mode.Whole, ToRecycleBin = TestRecycle, AlwaysRecycle = TestRecycle };
                         t.Paths.Add(TestItemPath);
                         t.Size = Scanner.SizeOf(t);
                         r.Insert(0, t);
@@ -808,6 +810,7 @@ namespace DiskSweep
                 items = result;
                 Rebuild();
                 lastScan = DateTime.Now;
+                TakeSnapshot(false);   // once a day, in the background
                 RefreshDrives();
                 UpdateStatus();
 
@@ -887,6 +890,8 @@ namespace DiskSweep
                     dlgStatus.Text = (i + 1) + " of " + sel.Count + ":  " + it.Name + (it.Mode == Mode.Command ? "  (can take a few minutes)" : "");
                     long freed = await Task.Run(() => Cleaner.Clean(it));
                     it.CleanedBytes = freed;
+                    Activity.Add(it.ToRecycleBin ? "recycled" : it.Mode == Mode.Command || it.Mode == Mode.RecycleBin ? "system" : "deleted",
+                                 it.Name, freed, it.ToRecycleBin ? (it.RecycledPaths ?? it.Paths) : it.Paths);
                     bool partial = it.Size > 0 && freed < it.Size * 0.9;
                     if (it.ToRecycleBin) recycled += freed;
                     string what = it.ToRecycleBin
@@ -973,7 +978,8 @@ namespace DiskSweep
             // Developer checks without UI:
             //   DiskSweep.exe --report out.txt [projectFolder]   scan only, write results
             //   DiskSweep.exe --selftest emptyFolder             test delete logic on a fixture
-            if (args.Length >= 1 && args[0] == "--check-space") return Settings.CheckSpace();   // run by Task Scheduler
+            if (args.Length >= 1 && args[0] == "--check-space") return Settings.CheckSpace();
+            if (args.Length >= 1 && args[0] == "--auto-clean") return AutoClean.Run();         // run by Task Scheduler   // run by Task Scheduler
                         if (args.Length >= 3 && args[0] == "--test-move")      // <folder> <targetDriveRoot>
             {
                 string err = Mover.Check(args[1], args[2]) ?? Mover.Move(args[1], args[2], null);

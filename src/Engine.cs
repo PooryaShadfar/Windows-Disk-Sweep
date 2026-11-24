@@ -18,9 +18,9 @@ using System.Threading.Tasks;
 [assembly: System.Reflection.AssemblyDescription("Find and remove junk files on Windows. You choose what goes.")]
 [assembly: System.Reflection.AssemblyProduct("Disk Sweep")]
 [assembly: System.Reflection.AssemblyCopyright("Copyright (c) 2026 Poorya Shadfar. MIT License.")]
-[assembly: System.Reflection.AssemblyVersion("1.3.3.0")]
-[assembly: System.Reflection.AssemblyFileVersion("1.3.3.0")]
-[assembly: System.Reflection.AssemblyInformationalVersion("1.3.3")]
+[assembly: System.Reflection.AssemblyVersion("1.4.0.0")]
+[assembly: System.Reflection.AssemblyFileVersion("1.4.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersion("1.4.0")]
 
 namespace DiskSweep
 {
@@ -57,7 +57,9 @@ namespace DiskSweep
         public bool Checked;
         public string RunningText;      // apps that should be closed first
         public long CleanedBytes;       // filled in after cleaning
-        public bool ToRecycleBin;       // move to Recycle Bin instead of deleting (personal files)
+        public bool AlwaysRecycle;      // set by finders for personal files: always goes to the Recycle Bin
+        public bool ToRecycleBin;
+        public List<string> RecycledPaths;  // filled in after moving to the Recycle Bin (for the activity log)       // move to Recycle Bin instead of deleting (personal files)
         public string Key { get { return Category + "|" + Name; } }
     }
 
@@ -579,6 +581,7 @@ namespace DiskSweep
                         long before = Native.FreeBytes(drive);
                         if (it.Cmd == "sagerun") SystemCommands.SageRun(it.CmdArgs);
                         else if (it.Cmd == "compact-vhdx") SystemCommands.CompactVhdx(it.CmdArgs);
+                        else if (it.Cmd == "vss-old") SystemSpace.DeleteOld(it.CmdArgs);
                         else RunHidden(it.Cmd, it.CmdArgs);
                         return Math.Max(0, Native.FreeBytes(drive) - before);
                     }
@@ -601,6 +604,7 @@ namespace DiskSweep
                                 catch { }
                             }
                             long before = SizeOfPaths(it);
+                            it.RecycledPaths = targets;
                             Native.Recycle(targets);
                             return Math.Max(0, before - SizeOfPaths(it));
                         }
@@ -732,7 +736,49 @@ namespace DiskSweep
                 log.AppendLine("age filter: measured " + measured + " (expect 3000), removed " + removed + ", new kept: " + keptNew + ", old removed: " + goneOld);
                 if (measured != 3000 || removed != 3000 || !keptNew || !goneOld) ok = false;
             }
-            catch (Exception ex) { ok = false; log.AppendLine("age ERROR: " + ex.Message); }            try { if (!Health.SelfTest(log)) ok = false; } catch (Exception ex) { ok = false; log.AppendLine("health ERROR: " + ex.Message); }
+            catch (Exception ex) { ok = false; log.AppendLine("age ERROR: " + ex.Message); }            try
+            {
+                // Recycle Bin restore through the activity log
+                Activity.Muted = true;
+                string rf = Path.Combine(dir, "ds-restore-test.txt");
+                File.WriteAllText(rf, "restore me");
+                var ri = new CleanItem { Name = "ds-restore-test", Mode = Mode.Whole, ToRecycleBin = true };
+                ri.Paths.Add(rf);
+                Cleaner.Clean(ri);
+                var entry = new ActivityEntry { Kind = "recycled", Name = ri.Name, Paths = ri.RecycledPaths };
+                bool gone = !File.Exists(rf);
+                int can = Activity.Restorable(entry);
+                int back = Activity.Restore(entry);
+                bool restored = File.Exists(rf) && File.ReadAllText(rf) == "restore me";
+                log.AppendLine("restore: recycled " + gone + ", restorable " + can + ", restored " + back + ", content ok " + restored);
+                if (!gone || can != 1 || back != 1 || !restored) ok = false;
+
+                // What grew: two made-up snapshots for drive Z:
+                string snaps = Path.Combine(Settings.Dir, "snapshots");
+                Directory.CreateDirectory(snaps);
+                string s1 = Path.Combine(snaps, "Z_20200101-1200.tsv"), s2 = Path.Combine(snaps, "Z_20200110-1200.tsv");
+                File.WriteAllText(s1, "#total\t10000000000\t0\nZ:\\proj\t1000000000\nZ:\\proj\\node_modules\t500000000\nZ:\\games\t3000000000\n");
+                File.WriteAllText(s2, "#total\t13000000000\t0\nZ:\\proj\t3600000000\nZ:\\proj\\node_modules\t3000000000\nZ:\\games\t3000000000\nZ:\\video\t400000000\n");
+                DateTime? since; long total;
+                var rows = Growth.Compare("Z:\\", 7, out since, out total);
+                File.Delete(s1); File.Delete(s2);
+                bool g = rows.Count == 2 && rows[0].Path == "Z:\\proj\\node_modules" && rows[0].Change == 2500000000
+                         && rows[1].Path == "Z:\\video" && total == 3000000000;
+                log.AppendLine("growth: " + string.Join(", ", rows.Select(r => r.Path + " +" + r.Change)) + " total +" + total + " -> " + (g ? "ok" : "FAIL"));
+                if (!g) ok = false;
+
+                // Auto-clean only touches Safe, direct-delete items
+                var safe = new CleanItem { Category = Scanner.CatDev, Name = "t1", Safety = Safety.Safe, Mode = Mode.Contents, Size = 5 };
+                var review = new CleanItem { Category = Scanner.CatDev, Name = "t2", Safety = Safety.Review, Mode = Mode.Contents, Size = 5 };
+                var bin = new CleanItem { Category = Scanner.CatWin, Name = "t3", Safety = Safety.Safe, Mode = Mode.RecycleBin, Size = 5 };
+                var big = new CleanItem { Category = Scanner.CatBig, Name = "t4", Safety = Safety.Safe, Mode = Mode.Whole, Size = 5 };
+                var adm = new CleanItem { Category = Scanner.CatWin, Name = "t5", Safety = Safety.Safe, Mode = Mode.Contents, Size = 5, NeedsAdmin = true };
+                bool a = AutoClean.Eligible(safe) && !AutoClean.Eligible(review) && !AutoClean.Eligible(bin) && !AutoClean.Eligible(big) && !AutoClean.Eligible(adm);
+                log.AppendLine("auto-clean rules -> " + (a ? "ok" : "FAIL"));
+                if (!a) ok = false;
+            }
+            catch (Exception ex) { ok = false; log.AppendLine("1.4 ERROR: " + ex); }
+            try { if (!Health.SelfTest(log)) ok = false; } catch (Exception ex) { ok = false; log.AppendLine("health ERROR: " + ex.Message); }
             log.AppendLine(ok ? "SELFTEST PASS" : "SELFTEST FAIL");
             File.WriteAllText(Path.Combine(dir, "selftest.txt"), log.ToString());
             return ok ? 0 : 1;

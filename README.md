@@ -12,7 +12,7 @@
 <p align="center">
   <a href="https://github.com/PooryaShadfar/Windows-Disk-Sweep/releases/latest"><img src="https://img.shields.io/github/v/release/PooryaShadfar/Windows-Disk-Sweep?label=download&color=0F6CBD" alt="Latest release"></a>
   <img src="https://img.shields.io/badge/Windows-10%20%7C%2011-0F6CBD" alt="Windows 10 and 11">
-  <img src="https://img.shields.io/badge/size-~270%20KB-brightgreen" alt="Size">
+  <img src="https://img.shields.io/badge/size-~322%20KB-brightgreen" alt="Size">
   <a href="LICENSE"><img src="https://img.shields.io/github/license/PooryaShadfar/Windows-Disk-Sweep?color=lightgrey" alt="MIT license"></a>
 </p>
 
@@ -35,7 +35,10 @@ Disk Sweep scans the usual places, shows how much each one takes, and lets you p
 - **Cleans your code folders.** Add your code folders once. Every scan then lists `node_modules`, build caches (`.next`, `.nuxt`, `.turbo`, …), .NET `bin`/`obj`, Rust `target`, Gradle `build`, Python virtual environments and `__pycache__`.
 - **Finds leftovers of removed apps.** Lists folders in AppData whose app is no longer installed and that haven't changed in over 30 days.
 - **Shows your largest files.** Lists the biggest files in your folders, such as old zips, videos and installers. These always go to the **Recycle Bin**, never straight to deletion.
-- **Undo-friendly.** "Check first" items go to the Recycle Bin by default, so a mistake can be undone.
+- **Undo-friendly.** "Check first" items go to the Recycle Bin by default. **Tools > Activity** lists everything Disk Sweep removed, moved or compressed, with a **Restore** button for items still in the Recycle Bin.
+- **What grew?** Disk Sweep takes a snapshot of folder sizes once a day and shows which folders grew the most in the last snapshot, 7 days or 30 days.
+- **System space.** Remove old System Restore points (keeping the newest), limit how much space they may use, and turn Windows' reserved storage (about 7 GB) off or on.
+- **Auto-clean (optional).** Cleans only "Safe" items every Sunday and tells you how much it freed.
 - **All your drives.** Switch between C:, D:, E: and so on in the drive card.
 - **Tools.** A **space map** of any drive or folder, **apps by size** with uninstall, **move a folder** to another drive (Downloads, npm cache, …) with a link left behind, and **compression** for Windows and rarely used folders.
 - **Game caches.** Steam shader cache per game, Steam leftovers, and Epic, Battle.net, EA, Ubisoft and GOG launcher caches.
@@ -46,7 +49,7 @@ Disk Sweep scans the usual places, shows how much each one takes, and lets you p
 - **History.** See how much you've cleaned in total.
 - **Safe deletion.** It never follows links or junctions out of a folder, so pnpm stores and git worktrees can't pull in files from elsewhere. It handles very long paths and skips files that are in use.
 - **Modern UI.** Light, dark, or the same as Windows. You choose in Settings. Works with the keyboard and screen readers.
-- **Tiny and portable.** One ~270 KB `.exe`, no installer, no telemetry, no network access. It uses the .NET Framework 4.8 that ships with Windows.
+- **Tiny and portable.** One ~322 KB `.exe`, no installer, no telemetry, no network access. It uses the .NET Framework 4.8 that ships with Windows.
 
 <p align="center">
   <img src="docs/confirm.png" alt="Confirmation dialog before deleting" width="640">
@@ -95,6 +98,9 @@ Click **Tools** at the top:
 | **Apps by size** | Installed programs, biggest first, with publisher, version and install date. **Uninstall…** opens the app's own uninstaller. Store apps open in Windows Settings |
 | **Move a folder** | Moves a folder such as Downloads or the npm cache to another drive. Disk Sweep copies it, checks the copy, leaves a link in the old place (Downloads is moved the Windows way), then removes the old copy. If anything goes wrong, the folder goes back where it was. System folders and Steam libraries are blocked; use Steam's own *Move install folder* for games |
 | **Compress** | Windows' built-in compression. **Compress Windows** (CompactOS, admin) usually saves 2–5 GB. **Compress a folder** shrinks folders you rarely use; files keep working as normal |
+| **What grew?** | Compares daily snapshots of folder sizes (20 MB+, five levels deep) and lists the folders that grew the most since the last snapshot, in 7 days or in 30 days. A snapshot is taken in the background once a day when you open Disk Sweep, or with **Take snapshot now** |
+| **System** (admin) | **System Restore points:** see how many there are and how much space they use, remove old ones while keeping the newest, and set a size limit. **Reserved storage:** turn off the ~7 GB Windows keeps for updates, or turn it back on |
+| **Activity** | Everything Disk Sweep removed, moved or compressed, newest first. Items that went to the Recycle Bin and are still there get a **Restore** button that puts them back where they were (never overwriting anything) |
 
 Nothing in Tools runs on its own. Every change asks first.
 
@@ -139,9 +145,10 @@ Click the gear button to open Settings:
 - **Low-space and health alert:** get a Windows notification when a drive drops below a limit you set or reports a health problem. It checks every 3 hours while you're signed in, and notifies you at most once a day.
 - **Developers:** keep package caches used in the last N days (default 30), and skip build folders of projects you worked on in the last N days (default 14). A project counts as "worked on" when its files, git index or installed packages changed.
 - **Hidden items:** bring back items you hid.
+- **Auto-clean:** clean "Safe" items every Sunday at 12:00 through Task Scheduler (off by default). It only touches caches and temp files marked Safe, never the Recycle Bin, large files, project folders, hidden items or anything marked "Check first". You get a notification with what was freed, and each run shows up in Tools > Activity.
 - **History:** total space cleaned and your recent cleanups.
 
-Settings are plain text files in `%LOCALAPPDATA%\DiskSweep`.
+Settings, the activity log and the folder-size snapshots are plain text files in `%LOCALAPPDATA%\DiskSweep`.
 
 ## Drive health
 
@@ -185,6 +192,7 @@ bin\DiskSweep.exe --health-report health.txt       :: write drive health to a te
 bin\DiskSweep.exe --test-map <folder> map.txt      :: measure a folder like the space map does
 bin\DiskSweep.exe --test-move <folder> <drive:\>   :: move a folder like the Move tool does (it really moves it)
 bin\DiskSweep.exe --test-compress <folder> out.txt :: compress a folder like the Compress tool does
+bin\DiskSweep.exe --auto-clean                     :: the weekly auto-clean that Task Scheduler runs (only when it is switched on)
 ```
 
 ### Project layout
@@ -197,6 +205,9 @@ src/Health.cs        SSD/HDD health: status, wear, temperature, SMART
 src/Finders2.cs      game caches, Windows.old and setup leftovers, WSL and Docker disks
 src/Tools.cs         space map, apps by size, folder mover, compression
 src/ToolsUi.cs       the Tools window
+src/ToolsUi2.cs      What grew?, System and Activity tabs, auto-clean setting
+src/SystemTools.cs   folder-size snapshots, restore points, reserved storage, auto-clean
+src/Activity.cs      activity log and restoring from the Recycle Bin
 src/App.cs           WPF window logic, theme, dialogs, settings page
 src/MainWindow.xaml  the layout and styles
 assets/              app icon and the script that draws it
