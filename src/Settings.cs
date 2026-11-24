@@ -32,7 +32,8 @@ namespace DiskSweep
         public static int AlertGB = 10;
         public static int CacheDays = 30;           // package caches: keep files used in the last N days
         public static int ProjectDays = 14;
-        public static bool AutoClean;                // weekly clean of Safe items (Task Scheduler)         // build folders: skip projects changed in the last N days
+        public static bool AutoClean;
+        public static bool RestoreBefore = true;        // admin: restore point before big changes                // weekly clean of Safe items (Task Scheduler)         // build folders: skip projects changed in the last N days
         public static DateTime LastAlert = DateTime.MinValue;
         public static Dictionary<string, string> Hidden = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase); // key -> label
         public static List<HistoryEntry> History = new List<HistoryEntry>();
@@ -55,6 +56,7 @@ namespace DiskSweep
                             case "AlertGB": int g; if (int.TryParse(v, out g) && g > 0) AlertGB = g; break;
                             case "CacheDays": int cd; if (int.TryParse(v, out cd) && cd >= 0) CacheDays = cd; break;
                             case "AutoClean": AutoClean = v == "1"; break;
+                            case "RestoreBefore": RestoreBefore = v == "1"; break;
                             case "ProjectDays": int pd; if (int.TryParse(v, out pd) && pd >= 0) ProjectDays = pd; break;
                             case "LastAlert":
                                 DateTime d;
@@ -105,6 +107,7 @@ namespace DiskSweep
                     "CacheDays=" + CacheDays,
                     "ProjectDays=" + ProjectDays,
                     "AutoClean=" + (AutoClean ? "1" : "0"),
+                    "RestoreBefore=" + (RestoreBefore ? "1" : "0"),
                     "LastAlert=" + LastAlert.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)
                 });
                 File.WriteAllLines(HiddenFile, Hidden.Select(kv => kv.Key + "\t" + kv.Value.Replace("\t", " ")));

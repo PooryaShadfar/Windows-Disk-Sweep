@@ -363,6 +363,7 @@ namespace DiskSweep
             WireHealth();
             WireTools();
             WireTools2();
+            WireTools3();
 
             view = new ListCollectionView(vms);
             view.GroupDescriptions.Add(new PropertyGroupDescription("Group"));
@@ -630,6 +631,7 @@ namespace DiskSweep
             themeLight.IsChecked = Settings.Theme == "Light";
             themeDark.IsChecked = Settings.Theme == "Dark";
             optRecycle.IsChecked = Settings.RecycleReview;
+            optRestore.IsChecked = Settings.RestoreBefore;
             bool task = Settings.AlertTaskExists();
             optAlert.IsChecked = Settings.AlertOn && task;
             alertGB.Text = Settings.AlertGB.ToString();
@@ -876,6 +878,7 @@ namespace DiskSweep
             cleaning = true;
             SetBusy(true);
             var progressDialog = ShowDialog("Cleaning…", "Please keep Disk Sweep open.", null, null, null, null, false, true, null);
+            string rpNote = sel.Any(RestorePoint.IsBigChange) ? await RestorePointFirst("cleanup", s => dlgStatus.Text = s) : null;
             dlgProgress.Maximum = sel.Count;
             dlgProgress.Value = 0;
             long freeBefore = Native.FreeBytes(selectedDrive);
@@ -911,6 +914,7 @@ namespace DiskSweep
             if (cleanedTotal > 0) { Settings.History.Add(new HistoryEntry { When = DateTime.Now, Bytes = cleanedTotal, Items = sel.Count }); Settings.Save(); }
             bool anyPartial = results.Any(r => r.Value.Contains("in use"));
             string note = error ?? (anyPartial ? "Some files were in use and were skipped. Close those apps and clean again to get the rest." : null);
+            if (rpNote != null) note = note == null ? rpNote : note + "  " + rpNote;
             if (note == null && recycled > 0) note = Util.Fmt(recycled) + " is in the Recycle Bin. Empty it to free that space too.";
             await ShowDialog(del.Count == 0 ? "Moved to Recycle Bin" : "Freed " + Util.Fmt(gained),
                 "Drive " + selectedDrive.TrimEnd('\\') + " now has " + Util.Fmt(Native.FreeBytes(selectedDrive)) + " free.",
@@ -992,6 +996,19 @@ namespace DiskSweep
                 var sb = new System.Text.StringBuilder("total " + tree.Size + "\n");
                 foreach (var c in tree.Children.Take(15)) sb.AppendLine(c.Size + "\t" + c.Name);
                 File.WriteAllText(args[2], sb.ToString());
+                return 0;
+            }
+            if (args.Length >= 3 && args[0] == "--test-dups")      // <folder> <outFile>
+            {
+                var groups = Duplicates.Find(new[] { args[1] }, 1L << 20, null, System.Threading.CancellationToken.None);
+                File.WriteAllText(args[2], string.Join("\n", groups.Select(g => g.Size + "\t" + string.Join(" | ", g.Files.Select(f => Path.GetFileName(f.Path))))));
+                return 0;
+            }
+            if (args.Length >= 3 && args[0] == "--test-leftovers") // <appName> <outFile>
+            {
+                var fakeApp = new AppEntry { Name = args[1], Publisher = "", Location = "", KeyPath = "" };
+                var left = AppLeftovers.Find(fakeApp, Apps.List());
+                File.WriteAllText(args[2], string.Join("\n", left.Select(l => l.Item2 + "\t" + l.Item1)));
                 return 0;
             }
             if (args.Length >= 3 && args[0] == "--test-compress")  // <folder> <outFile>

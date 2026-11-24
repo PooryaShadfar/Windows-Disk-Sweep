@@ -99,6 +99,7 @@ namespace DiskSweep
                 try { Apps.Uninstall(vm.App); }
                 catch (Exception ex) { error = ex.Message; }
                 if (error != null) await ShowDialog("Couldn't start the uninstaller", error, null, null, "OK", null, false, false, null);
+                else WatchUninstall(vm.App);
             }));
 
             // move
@@ -142,7 +143,7 @@ namespace DiskSweep
         {
             toolsOverlay.Visibility = Visibility.Visible;
             var tabs = new[] { Tuple.Create(toolMap, "map"), Tuple.Create(toolApps, "apps"), Tuple.Create(toolMove, "move"), Tuple.Create(toolCompress, "compress"),
-                               Tuple.Create(toolGrowth, "growth"), Tuple.Create(toolSystem, "system"), Tuple.Create(toolActivity, "activity") };
+                               Tuple.Create(toolDup, "dup"), Tuple.Create(toolGrowth, "growth"), Tuple.Create(toolSystem, "system"), Tuple.Create(toolActivity, "activity") };
             var current = tabs.FirstOrDefault(x => x.Item1.IsChecked == true);
             if (current == null) toolMap.IsChecked = true; else ShowTool(current.Item2);
         }
@@ -163,6 +164,7 @@ namespace DiskSweep
             growthPanel.Visibility = which == "growth" ? Visibility.Visible : Visibility.Collapsed;
             systemPanel.Visibility = which == "system" ? Visibility.Visible : Visibility.Collapsed;
             activityPanel.Visibility = which == "activity" ? Visibility.Visible : Visibility.Collapsed;
+            dupPanel.Visibility = which == "dup" ? Visibility.Visible : Visibility.Collapsed;
             switch (which)
             {
                 case "map":
@@ -181,6 +183,11 @@ namespace DiskSweep
                     toolSub.Text = "Frees space on this drive. Apps keep finding the folder through a link.";
                     RefreshMoveDrives();
                     UpdateMove();
+                    break;
+                case "dup":
+                    toolTitle.Text = "Duplicate files";
+                    toolSub.Text = "Exact copies, found by comparing file content. The oldest copy is kept; the others are checked and go to the Recycle Bin.";
+                    ShowDupRoots();
                     break;
                 case "growth":
                     toolTitle.Text = "What grew?";
@@ -359,9 +366,10 @@ namespace DiskSweep
             if (ok != 1) return;
             toolBusy = true; cleaning = true;
             moveGo.IsEnabled = false;
-            string err;
+            string err, rpNote = null;
             try
             {
+                rpNote = await RestorePointFirst("moving " + Path.GetFileName(src.TrimEnd('\\')), s => moveStatus.Text = s);
                 var prog = new Progress<string>(s => moveStatus.Text = s);
                 long before = Native.FreeBytes(Path.GetPathRoot(src));
                 err = await Task.Run(() => Mover.Move(src, dst, prog));
@@ -373,7 +381,7 @@ namespace DiskSweep
             catch (Exception ex) { err = ex.Message; }
             finally { toolBusy = false; cleaning = false; }
             await ShowDialog(err == null ? "Folder moved" : "Folder not moved", err ?? ("It now lives in " + Mover.TargetFor(src, dst) + ". The old place links to it."),
-                null, null, "OK", null, false, false, null);
+                null, rpNote, "OK", null, false, false, null);
             moveSource = null;
             RefreshMoveDrives();
             UpdateMove();
@@ -398,13 +406,18 @@ namespace DiskSweep
                 null, null, "Compress Windows", "Cancel", false, false, null);
             if (ok != 1) return;
             toolBusy = true; cleaning = true; compactOsGo.IsEnabled = false;
-            compactOsText.Text = "Compressing Windows… keep Disk Sweep open. This takes a while.";
+            string rpNote = null;
             long saved = 0;
-            try { saved = await Task.Run(() => Compressor.EnableCompactOs()); }
+            try
+            {
+                rpNote = await RestorePointFirst("compressing Windows", s => compactOsText.Text = s);
+                compactOsText.Text = "Compressing Windows… keep Disk Sweep open. This takes a while.";
+                saved = await Task.Run(() => Compressor.EnableCompactOs());
+            }
             finally { toolBusy = false; cleaning = false; }
             Activity.Add("compressed", "Windows system files (CompactOS)", saved);
             if (saved > 0) { Settings.History.Add(new HistoryEntry { When = DateTime.Now, Bytes = saved, Items = 1 }); Settings.Save(); }
-            await ShowDialog("Windows compressed", "Saved " + Util.Fmt(saved) + ".", null, null, "OK", null, false, false, null);
+            await ShowDialog("Windows compressed", "Saved " + Util.Fmt(saved) + ".", null, rpNote, "OK", null, false, false, null);
             LoadCompactOs();
         }
 
