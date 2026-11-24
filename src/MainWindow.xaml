@@ -420,7 +420,7 @@
             <TextBlock Text="Selected to clean" Style="{StaticResource Caption}"/>
           </StackPanel>
           <TextBlock x:Name="SelText" Text="0 B" Style="{StaticResource Big}"/>
-          <TextBlock x:Name="SelSub" Text="Tick items below" Style="{StaticResource Caption}" Margin="0,10,0,0"/>
+          <TextBlock x:Name="SelSub" Text="Check items below" Style="{StaticResource Caption}" Margin="0,10,0,0"/>
         </StackPanel>
       </Border>
     </Grid>
@@ -635,18 +635,18 @@
           <TextBlock x:Name="StatusText" Style="{StaticResource Caption}" Margin="0,2,0,0" TextTrimming="CharacterEllipsis"/>
         </StackPanel>
         <StackPanel Grid.Column="1" Orientation="Horizontal">
-          <Button x:Name="BtnNone" Style="{StaticResource Subtle}" Content="Untick all" Margin="0,0,8,0"/>
+          <Button x:Name="BtnNone" Style="{StaticResource Subtle}" Content="Uncheck" Margin="0,0,8,0"/>
           <Button x:Name="BtnSafe" Style="{StaticResource Secondary}" Margin="0,0,12,0"
-                  ToolTip="Ticks every 'Safe' item in the current view.">
+                  ToolTip="Checks every 'Safe' item in the current view.">
             <StackPanel Orientation="Horizontal">
               <TextBlock Text="&#xE73A;" Style="{StaticResource Glyph}" Margin="0,0,8,0"/>
-              <TextBlock Text="Tick all safe"/>
+              <TextBlock Text="Check all safe"/>
             </StackPanel>
           </Button>
           <Button x:Name="BtnClean" Style="{StaticResource Primary}" Padding="22,10" IsEnabled="False">
             <StackPanel Orientation="Horizontal">
               <TextBlock Text="&#xE74D;" Style="{StaticResource Glyph}" Margin="0,0,10,0"/>
-              <TextBlock x:Name="CleanLabel" Text="Clean selected"/>
+              <TextBlock x:Name="CleanLabel" Text="Remove Selected"/>
             </StackPanel>
           </Button>
         </StackPanel>

@@ -743,8 +743,8 @@ namespace DiskSweep
             var sel = Selected();
             long sum = sel.Where(i => i.Size > 0).Sum(i => i.Size);
             selText.Text = Util.Fmt(sum) + (sel.Any(i => i.Size < 0) ? "+" : "");
-            selSub.Text = sel.Count == 0 ? "Tick items below" : sel.Count + " item" + (sel.Count == 1 ? "" : "s") + " selected";
-            cleanLabel.Text = sel.Count == 0 ? "Clean selected" : "Clean " + Util.Fmt(sum) + (sel.Any(i => i.Size < 0) ? "+" : "");
+            selSub.Text = sel.Count == 0 ? "Check items below" : sel.Count + " item" + (sel.Count == 1 ? "" : "s") + " selected";
+            cleanLabel.Text = sel.Count == 0 ? "Remove Selected" : "Remove " + Util.Fmt(sum) + (sel.Any(i => i.Size < 0) ? "+" : "");
             btnClean.IsEnabled = !busy && sel.Count > 0;
         }
 

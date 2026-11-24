@@ -79,8 +79,8 @@ Disk Sweep scans the usual places, shows how much each one takes, and lets you p
 1. **Open Disk Sweep.** It scans automatically. A scan usually takes under a minute.
 2. **Optional: add your code folders.** Click **Code folders** so build folders show up too.
 3. **Look through the list.** Use the categories on the left to focus. Hover over an item to see its folders.
-4. **Tick what you want gone.** You can also use **Tick all safe**.
-5. **Click "Clean".** Check the list in the confirmation dialog, then confirm.
+4. **Check what you want gone.** You can also use **Check all safe**.
+5. **Click "Remove Selected".** Check the list in the confirmation dialog, then confirm.
 6. **See the result.** Disk Sweep shows what each item freed, then scans again.
 
 Some system folders need administrator rights. These items show in grey until you click the **shield button** at the top to restart Disk Sweep as administrator.
