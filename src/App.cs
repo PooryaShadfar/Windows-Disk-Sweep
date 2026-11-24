@@ -48,9 +48,10 @@ namespace DiskSweep
 
         public static ResourceDictionary Res;
 
-        public static void Apply(ResourceDictionary r)
+        // mode: "System" follows Windows, or "Light" / "Dark"
+        public static void Apply(ResourceDictionary r, string mode)
         {
-            Dark = ReadDark();
+            Dark = mode == "Dark" || (mode != "Light" && ReadDark());
             Res = r;
             foreach (var kv in Dark ? DarkMap : Light)
             {
@@ -92,6 +93,7 @@ namespace DiskSweep
         public Brush BadgeBg { get { return Theme.Get(Item.Safety == Safety.Safe ? "SafeBg" : "ReviewBg"); } }
         public Brush BadgeFg { get { return Theme.Get(Item.Safety == Safety.Safe ? "SafeFg" : "ReviewFg"); } }
         public Visibility AdminVis { get { return Item.NeedsAdmin ? Visibility.Visible : Visibility.Collapsed; } }
+        public Visibility RecycleVis { get { return Item.ToRecycleBin ? Visibility.Visible : Visibility.Collapsed; } }
         public string Tip { get; private set; }
 
         bool chk;
@@ -198,28 +200,38 @@ namespace DiskSweep
         static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
 
         public static string TestItemPath;
+        public static bool TestRecycle;
         public Window Window;
         ItemsControl list, dlgList;
         ListBox nav;
         TextBlock driveLabel, driveFree, driveSub, foundText, foundSub, selText, selSub, statusText, scanText, scanSub, cleanLabel;
         TextBlock dlgTitle, dlgText, dlgWarn, dlgStatus;
         ProgressBar driveBar, dlgProgress;
-        Button btnScan, btnFolder, btnAdmin, btnSafe, btnNone, btnClean, dlgOk, dlgCancel;
+        Button btnScan, btnFolder, btnAdmin, btnSafe, btnNone, btnClean, dlgOk, dlgCancel, dlgAlt;
         FrameworkElement scanPanel, emptyPanel, listScroll, overlay, dlgListBox, dlgWarnRow, dlgButtons;
+        // settings page + drives
+        FrameworkElement settingsOverlay;
+        ItemsControl drivesCtl, hiddenList, histList;
+        RadioButton themeSystem, themeLight, themeDark;
+        CheckBox optRecycle, optAlert;
+        TextBox alertGB;
+        TextBlock alertStatus, hiddenEmpty, histTotal, histSub, aboutText;
+        string selectedDrive = Native.SysRoot;
+        bool loadingSettings;
+        const string RepoUrl = "https://github.com/PooryaShadfar/Windows-Disk-Sweep";
 
         readonly ObservableCollection<ItemVM> vms = new ObservableCollection<ItemVM>();
         ListCollectionView view;
         string filterKey;
         List<CleanItem> items = new List<CleanItem>();
-        List<CleanItem> extra = new List<CleanItem>();
         bool isAdmin, busy, cleaning;
-        TaskCompletionSource<bool> dlgTcs;
+        TaskCompletionSource<int> dlgTcs;
 
         static readonly Dictionary<string, string> Glyphs = new Dictionary<string, string>
         {
             {Scanner.CatWin, ""}, {Scanner.CatGpu, ""}, {Scanner.CatDev, ""},
             {Scanner.CatWeb, ""}, {Scanner.CatApp, ""}, {Scanner.CatOld, ""},
-            {"Project node_modules", ""}
+            {Scanner.CatProj, "\uE8B7"}, {Scanner.CatLeft, "\uEA86"}, {Scanner.CatBig, "\uE7C3"}
         };
 
         public MainUi()
@@ -229,7 +241,8 @@ namespace DiskSweep
 
             using (var s = Assembly.GetExecutingAssembly().GetManifestResourceStream("MainWindow.xaml"))
                 Window = (Window)XamlReader.Load(s);
-            Theme.Apply(Window.Resources);
+            Settings.Load();
+            Theme.Apply(Window.Resources, Settings.Theme);
             if (isAdmin) Window.Title += "  (Administrator)";
             try
             {
@@ -247,12 +260,21 @@ namespace DiskSweep
             driveBar = F<ProgressBar>("DriveBar"); dlgProgress = F<ProgressBar>("DlgProgress");
             btnScan = F<Button>("BtnScan"); btnFolder = F<Button>("BtnFolder"); btnAdmin = F<Button>("BtnAdmin");
             btnSafe = F<Button>("BtnSafe"); btnNone = F<Button>("BtnNone"); btnClean = F<Button>("BtnClean");
-            dlgOk = F<Button>("DlgOk"); dlgCancel = F<Button>("DlgCancel");
+            dlgOk = F<Button>("DlgOk"); dlgCancel = F<Button>("DlgCancel"); dlgAlt = F<Button>("DlgAlt");
             scanPanel = F<FrameworkElement>("ScanPanel"); emptyPanel = F<FrameworkElement>("EmptyPanel");
             listScroll = list; overlay = F<FrameworkElement>("Overlay");
             dlgListBox = F<FrameworkElement>("DlgListBox"); dlgWarnRow = F<FrameworkElement>("DlgWarnRow"); dlgButtons = F<FrameworkElement>("DlgButtons");
 
             btnAdmin.Visibility = isAdmin ? Visibility.Collapsed : Visibility.Visible;
+
+            settingsOverlay = F<FrameworkElement>("SettingsOverlay");
+            drivesCtl = F<ItemsControl>("Drives"); hiddenList = F<ItemsControl>("HiddenList"); histList = F<ItemsControl>("HistList");
+            themeSystem = F<RadioButton>("ThemeSystem"); themeLight = F<RadioButton>("ThemeLight"); themeDark = F<RadioButton>("ThemeDark");
+            optRecycle = F<CheckBox>("OptRecycle"); optAlert = F<CheckBox>("OptAlert"); alertGB = F<TextBox>("AlertGB");
+            alertStatus = F<TextBlock>("AlertStatus"); hiddenEmpty = F<TextBlock>("HiddenEmpty");
+            histTotal = F<TextBlock>("HistTotal"); histSub = F<TextBlock>("HistSub"); aboutText = F<TextBlock>("AboutText");
+            WireSettings();
+            WireDrives();
 
             view = new ListCollectionView(vms);
             view.GroupDescriptions.Add(new PropertyGroupDescription("Group"));
@@ -266,16 +288,18 @@ namespace DiskSweep
                 view.Refresh();
             };
             btnScan.Click += (s, e) => Scan();
-            btnFolder.Click += (s, e) => FindFolder();
+            btnFolder.Click += (s, e) => CodeFolders();
             btnAdmin.Click += (s, e) => RestartAdmin();
             btnSafe.Click += (s, e) => TickSafe();
             btnNone.Click += (s, e) => { foreach (var v in vms) v.IsChecked = false; };
             btnClean.Click += (s, e) => Clean();
-            dlgOk.Click += (s, e) => CloseDialog(true);
-            dlgCancel.Click += (s, e) => CloseDialog(false);
+            dlgOk.Click += (s, e) => CloseDialog(1);
+            dlgAlt.Click += (s, e) => CloseDialog(2);
+            dlgCancel.Click += (s, e) => CloseDialog(0);
             Window.KeyDown += (s, e) =>
             {
-                if (e.Key == Key.Escape && overlay.Visibility == Visibility.Visible && dlgCancel.Visibility == Visibility.Visible) CloseDialog(false);
+                if (e.Key == Key.Escape && overlay.Visibility == Visibility.Visible && dlgCancel.Visibility == Visibility.Visible) CloseDialog(0);
+                else if (e.Key == Key.Escape && settingsOverlay.Visibility == Visibility.Visible) CloseSettings();
                 if (e.Key == Key.F5 && !busy) Scan();
             };
             Window.Closing += (s, e) => { if (cleaning) e.Cancel = true; };
@@ -287,6 +311,189 @@ namespace DiskSweep
         }
 
         T F<T>(string name) where T : class { return (T)Window.FindName(name); }
+
+        static string HideKey(CleanItem it)
+        {
+            return it.Category + "|" + (it.Paths.Count > 0 ? it.Paths[0] : it.Name);
+        }
+
+        // ---------------------------------------------------------- drives
+        class DriveVM
+        {
+            public string Root { get; set; }
+            public string Label { get; set; }
+            public string Tip { get; set; }
+            public bool IsSelected { get; set; }
+        }
+
+        void WireDrives()
+        {
+            drivesCtl.AddHandler(System.Windows.Controls.Primitives.ToggleButton.CheckedEvent, new RoutedEventHandler((s, e) =>
+            {
+                var rb = e.OriginalSource as RadioButton;
+                var d = rb == null ? null : rb.DataContext as DriveVM;
+                if (d == null || busy || d.Root.Equals(selectedDrive, StringComparison.OrdinalIgnoreCase)) return;
+                selectedDrive = d.Root;
+                filterKey = null;
+                Scan();
+            }));
+            RefreshDrives();
+        }
+
+        void RefreshDrives()
+        {
+            var drives = Settings.FixedDrives().Select(d => new DriveVM
+            {
+                Root = d.Name,
+                Label = d.Name.TrimEnd('\\'),
+                Tip = (string.IsNullOrEmpty(d.VolumeLabel) ? "Drive " + d.Name.TrimEnd('\\') : d.VolumeLabel) + ":  " + Util.Fmt(d.AvailableFreeSpace) + " free",
+                IsSelected = d.Name.Equals(selectedDrive, StringComparison.OrdinalIgnoreCase)
+            }).ToList();
+            drivesCtl.ItemsSource = drives;
+            drivesCtl.Visibility = drives.Count > 1 ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        // ---------------------------------------------------------- settings page
+        void WireSettings()
+        {
+            F<Button>("BtnSettings").Click += (s, e) => OpenSettings();
+            F<Button>("BtnCloseSettings").Click += (s, e) => CloseSettings();
+            settingsOverlay.MouseLeftButtonDown += (s, e) => { if (e.OriginalSource == settingsOverlay) CloseSettings(); };
+
+            RoutedEventHandler theme = (s, e) =>
+            {
+                if (loadingSettings) return;
+                Settings.Theme = themeDark.IsChecked == true ? "Dark" : themeLight.IsChecked == true ? "Light" : "System";
+                Settings.Save();
+                ApplyTheme();
+            };
+            themeSystem.Checked += theme; themeLight.Checked += theme; themeDark.Checked += theme;
+
+            RoutedEventHandler recycleChanged = (s, e) =>
+            {
+                if (loadingSettings) return;
+                Settings.RecycleReview = optRecycle.IsChecked == true;
+                Settings.Save();
+                Rebuild();
+            };
+            optRecycle.Checked += recycleChanged;
+            optRecycle.Unchecked += recycleChanged;
+            optAlert.Checked += (s, e) => SaveAlert();
+            optAlert.Unchecked += (s, e) => SaveAlert();
+            alertGB.LostFocus += (s, e) => SaveAlert();
+            alertGB.KeyDown += (s, e) => { if (e.Key == Key.Enter) SaveAlert(); };
+            alertGB.PreviewTextInput += (s, e) => { e.Handled = !e.Text.All(char.IsDigit); };
+
+            hiddenList.AddHandler(System.Windows.Controls.Primitives.ButtonBase.ClickEvent, new RoutedEventHandler((s, e) =>
+            {
+                var b = e.OriginalSource as Button;
+                if (b == null || (b.Tag as string) != "unhide") return;
+                var kv = (KeyValuePair<string, string>)b.DataContext;
+                Settings.Hidden.Remove(kv.Key);
+                Settings.Save();
+                FillSettings();
+                Rebuild();
+            }));
+            list.AddHandler(System.Windows.Controls.Primitives.ButtonBase.ClickEvent, new RoutedEventHandler((s, e) =>
+            {
+                var b = e.OriginalSource as Button;
+                if (b == null || (b.Tag as string) != "hide") return;
+                var vm = b.DataContext as ItemVM;
+                if (vm == null || busy) return;
+                Settings.Hidden[HideKey(vm.Item)] = vm.Item.Name + "  (" + vm.Item.Category + ")";
+                Settings.Save();
+                vm.IsChecked = false;
+                Rebuild();
+                statusText.Text = "Hidden \"" + vm.Item.Name + "\". Show it again in Settings.";
+            }));
+            F<Button>("BtnClearHist").Click += (s, e) => { Settings.History.Clear(); Settings.Save(); FillSettings(); UpdateStatus(); };
+            F<Button>("BtnGitHub").Click += (s, e) => { try { Process.Start(RepoUrl); } catch { } };
+
+            Microsoft.Win32.SystemEvents.UserPreferenceChanged += (s, e) =>
+            {
+                if (e.Category == UserPreferenceCategory.General && Settings.Theme == "System")
+                    Window.Dispatcher.BeginInvoke(new Action(ApplyTheme));
+            };
+        }
+
+        void ApplyTheme()
+        {
+            Theme.Apply(Window.Resources, Settings.Theme);
+            StyleTitleBar();
+            Rebuild();   // badge colors are bound per item
+        }
+
+        void SaveAlert()
+        {
+            if (loadingSettings) return;
+            int gb;
+            if (int.TryParse(alertGB.Text, out gb) && gb > 0 && gb < 100000) Settings.AlertGB = gb;
+            alertGB.Text = Settings.AlertGB.ToString();
+            bool want = optAlert.IsChecked == true;
+            bool ok = Settings.SetAlertTask(want);
+            Settings.AlertOn = want && ok;
+            Settings.Save();
+            if (want && !ok) optAlert.IsChecked = false;
+            alertStatus.Text = !want ? "Off."
+                : ok ? "On. You'll get a notification if any drive drops below " + Settings.AlertGB + " GB free (at most once a day)."
+                : "Couldn't create the scheduled check. Try again, or run Disk Sweep as administrator.";
+        }
+
+        void OpenSettings()
+        {
+            FillSettings();
+            settingsOverlay.Visibility = Visibility.Visible;
+            F<Button>("BtnCloseSettings").Focus();
+        }
+
+        void CloseSettings()
+        {
+            SaveAlert();
+            settingsOverlay.Visibility = Visibility.Collapsed;
+        }
+
+        void FillSettings()
+        {
+            loadingSettings = true;
+            themeSystem.IsChecked = Settings.Theme == "System";
+            themeLight.IsChecked = Settings.Theme == "Light";
+            themeDark.IsChecked = Settings.Theme == "Dark";
+            optRecycle.IsChecked = Settings.RecycleReview;
+            bool task = Settings.AlertTaskExists();
+            optAlert.IsChecked = Settings.AlertOn && task;
+            alertGB.Text = Settings.AlertGB.ToString();
+            alertStatus.Text = optAlert.IsChecked == true
+                ? "On. You'll get a notification if any drive drops below " + Settings.AlertGB + " GB free (at most once a day)."
+                : "Off.";
+
+            var hidden = Settings.Hidden.OrderBy(kv => kv.Value).ToList();
+            hiddenList.ItemsSource = hidden;
+            hiddenEmpty.Visibility = hidden.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+
+            histTotal.Text = Util.Fmt(Settings.TotalCleaned) + " cleaned";
+            histSub.Text = Settings.History.Count == 0 ? "No cleanups yet."
+                : "In " + Settings.History.Count + " cleanup" + (Settings.History.Count == 1 ? "" : "s") + ". Latest first:";
+            histList.ItemsSource = Settings.History.OrderByDescending(h => h.When).Take(12)
+                .Select(h => new KeyValuePair<string, string>(h.When.ToString("yyyy-MM-dd  HH:mm") + "   ·   " + h.Items + " item" + (h.Items == 1 ? "" : "s"),
+                                                            Util.Fmt(h.Bytes))).ToList();
+
+            F<Button>("BtnClearHist").Visibility = Settings.History.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+
+            var ver = Assembly.GetExecutingAssembly().GetName().Version;
+            aboutText.Text = "Disk Sweep " + ver.Major + "." + ver.Minor + "." + ver.Build + ".  Free and open source (MIT). "
+                + "No telemetry, no network access. Settings are stored in " + Settings.Dir + ".";
+            loadingSettings = false;
+        }
+
+        void UpdateStatus()
+        {
+            var folders = Settings.LoadFolders();
+            statusText.Text = (lastScan == DateTime.MinValue ? "" : "Last scan " + lastScan.ToShortTimeString() + ".  ")
+                + (Settings.TotalCleaned > 0 ? "Cleaned so far: " + Util.Fmt(Settings.TotalCleaned) + ".  " : "")
+                + (folders.Count > 0 ? "Code folders: " + string.Join(", ", folders) + "." : "Add your code folders to find build folders.");
+        }
+
+        DateTime lastScan = DateTime.MinValue;
 
         bool Available(CleanItem it) { return isAdmin || !it.NeedsAdmin; }
 
@@ -306,7 +513,10 @@ namespace DiskSweep
         // ---------------------------------------------------------- state -> screen
         void Rebuild()
         {
-            var all = items.Concat(extra).Where(i => i.Size < 0 || i.Size >= (1L << 20)).ToList();
+            foreach (var it in items)
+                it.ToRecycleBin = it.Category == Scanner.CatBig
+                    || (Settings.RecycleReview && it.Safety == Safety.Review && (it.Mode == Mode.Whole || it.Mode == Mode.Contents));
+            var all = items.Where(i => (i.Size < 0 || i.Size >= (1L << 20)) && !Settings.Hidden.ContainsKey(HideKey(i))).ToList();
             var cats = all.Select(i => i.Category).Distinct().ToList();
             var totals = cats.ToDictionary(c => c, c => all.Where(i => i.Category == c && i.Size > 0 && Available(i)).Sum(i => i.Size));
 
@@ -320,7 +530,7 @@ namespace DiskSweep
                 }
 
             string keep = filterKey;
-            var navs = new List<NavVM> { new NavVM { Key = null, Name = "All items", Glyph = "", SizeText = Util.Fmt(totals.Values.Sum()) } };
+            var navs = new List<NavVM> { new NavVM { Key = null, Name = "All items", Glyph = "", SizeText = Util.Fmt(totals.Where(kv => kv.Key != Scanner.CatBig).Sum(kv => kv.Value)) } };
             foreach (var c in cats)
             {
                 string g;
@@ -336,17 +546,22 @@ namespace DiskSweep
 
         void UpdateDrive()
         {
-            long free = Native.FreeBytes(), total = Native.TotalBytes(), used = total - free;
-            driveLabel.Text = "Drive " + Native.SysRoot.TrimEnd('\\');
+            long free = Native.FreeBytes(selectedDrive), total = Native.TotalBytes(selectedDrive), used = total - free;
+            driveLabel.Text = "Drive " + selectedDrive.TrimEnd('\\');
             driveFree.Text = Util.Fmt(free) + " free";
             driveBar.Value = total > 0 ? used * 100.0 / total : 0;
             driveSub.Text = Util.Fmt(used) + " used of " + Util.Fmt(total);
 
-            var avail = items.Concat(extra).Where(i => Available(i) && (i.Size < 0 || i.Size >= (1L << 20))).ToList();
-            int locked = items.Concat(extra).Count(i => !Available(i) && i.Size != 0);
-            foundText.Text = items.Count == 0 ? "…" : Util.Fmt(avail.Where(i => i.Size > 0).Sum(i => i.Size));
+            var shown = items.Where(i => !Settings.Hidden.ContainsKey(HideKey(i))).ToList();
+            var avail = shown.Where(i => Available(i) && (i.Size < 0 || i.Size >= (1L << 20))).ToList();
+            int locked = shown.Count(i => !Available(i) && i.Size != 0);
+            // Large files are personal: list them, but don't count them as junk you "can free".
+            var junk = avail.Where(i => i.Category != Scanner.CatBig).ToList();
+            long big = avail.Where(i => i.Category == Scanner.CatBig && i.Size > 0).Sum(i => i.Size);
+            foundText.Text = items.Count == 0 ? "…" : Util.Fmt(junk.Where(i => i.Size > 0).Sum(i => i.Size));
             foundSub.Text = items.Count == 0 ? "Scanning…"
-                : avail.Count + " items found" + (locked > 0 ? "  ·  " + locked + " more with admin rights" : "");
+                : junk.Count + " items found" + (locked > 0 ? "  ·  " + locked + " more with admin rights" : "")
+                  + (big > 0 ? "\n+ " + Util.Fmt(big) + " in large files to review" : "");
         }
 
         void UpdateSel()
@@ -392,31 +607,35 @@ namespace DiskSweep
             emptyPanel.Visibility = Visibility.Collapsed;
             scanPanel.Visibility = Visibility.Visible;
             scanText.Text = "Scanning your drive…";
-            scanSub.Text = "This usually takes under a minute.";
+            scanSub.Text = "This usually takes about a minute.";
             try
             {
                 var prog = new Progress<string>(s => scanSub.Text = s);
-                var prev = new HashSet<string>(items.Concat(extra).Where(i => i.Checked).Select(i => i.Key));
-                var ex = extra.ToList();
+                var prev = new HashSet<string>(items.Where(i => i.Checked).Select(i => i.Key));
+                string drive = selectedDrive;
+                var folders = Settings.LoadFolders().Where(f => f.StartsWith(drive, StringComparison.OrdinalIgnoreCase)).ToList();
                 var result = await Task.Run(() =>
                 {
-                    var r = Scanner.ScanAll(prog);
+                    var r = Scanner.ScanAll(prog, drive);
+                    foreach (var f in folders)
+                        if (Directory.Exists(f)) r.AddRange(Scanner.FindProjectJunk(f, prog));
                     if (TestItemPath != null && Fs.Exists(TestItemPath))
                     {
-                        var t = new CleanItem { Category = "Test", Name = "Test folder", Info = TestItemPath, Mode = Mode.Whole };
+                        var t = new CleanItem { Category = "Test", Name = "Test folder", Info = TestItemPath, Mode = Mode.Whole, ToRecycleBin = TestRecycle };
                         t.Paths.Add(TestItemPath);
                         t.Size = Scanner.SizeOf(t);
                         r.Insert(0, t);
                     }
-                    foreach (var it in ex) it.Size = Scanner.SizeOf(it);
-                    foreach (var it in r.Concat(ex)) MarkRunning(it);
+                    foreach (var it in r) MarkRunning(it);
                     return r;
                 });
                 foreach (var it in result) it.Checked = prev.Contains(it.Key);
                 items = result;
-                extra = ex.Where(i => i.Size != 0).ToList();
                 Rebuild();
-                statusText.Text = "Last scan " + DateTime.Now.ToShortTimeString() + ".  Hover an item to see its folders.";
+                lastScan = DateTime.Now;
+                RefreshDrives();
+                UpdateStatus();
+
             }
             catch (Exception e)
             {
@@ -430,74 +649,61 @@ namespace DiskSweep
             }
         }
 
-        async void FindFolder()
+        async void CodeFolders()
         {
             if (busy) return;
+            var folders = Settings.LoadFolders();
+            if (folders.Count > 0)
+            {
+                int r = await ShowDialog("Code folders",
+                    "On every scan, Disk Sweep looks inside these folders for node_modules, build caches and other build output.",
+                    folders.Select(f => new KeyValuePair<string, string>(f, Directory.Exists(f) ? "" : "missing")).ToList(),
+                    null, "Add folder…", "Close", false, false, "Forget all");
+                if (r == 2) { Settings.SaveFolders(new List<string>()); Scan(); return; }
+                if (r != 1) return;
+            }
             string root;
             try { root = FolderPicker.Pick(Window, "Pick the folder with your code projects"); }
             catch (Exception e) { statusText.Text = "Folder picker failed: " + e.Message; return; }
             if (string.IsNullOrEmpty(root)) return;
-
-            SetBusy(true);
-            listScroll.Visibility = Visibility.Collapsed;
-            emptyPanel.Visibility = Visibility.Collapsed;
-            scanPanel.Visibility = Visibility.Visible;
-            scanText.Text = "Looking for node_modules…";
-            scanSub.Text = root;
-            try
-            {
-                var prog = new Progress<string>(s => scanSub.Text = s);
-                var found = await Task.Run(() =>
-                {
-                    var f = Scanner.FindProjects(root, prog);
-                    foreach (var it in f) MarkRunning(it);
-                    return f;
-                });
-                string prefix = root.TrimEnd('\\') + "\\";
-                extra.RemoveAll(i => i.Paths.Count > 0 && i.Paths[0].StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
-                extra.AddRange(found.Where(f => f.Size != 0));
-                filterKey = found.Count > 0 ? "Project node_modules" : filterKey;
-                Rebuild();
-                statusText.Text = found.Count == 0 ? "No node_modules folders in " + root + "."
-                    : "Found " + found.Count + " node_modules folders in " + root + ".";
-            }
-            catch (Exception e)
-            {
-                statusText.Text = "Search failed: " + e.Message;
-            }
-            finally
-            {
-                scanPanel.Visibility = Visibility.Collapsed;
-                listScroll.Visibility = Visibility.Visible;
-                if (vms.Count == 0) emptyPanel.Visibility = Visibility.Visible;
-                SetBusy(false);
-            }
+            if (!folders.Contains(root, StringComparer.OrdinalIgnoreCase)) folders.Add(root);
+            Settings.SaveFolders(folders);
+            filterKey = Scanner.CatProj;
+            Scan();
         }
 
         async void Clean()
         {
             var sel = Selected();
             if (sel.Count == 0 || busy) return;
+            var del = sel.Where(i => !i.ToRecycleBin).ToList();
+            var rec = sel.Where(i => i.ToRecycleBin).ToList();
             long total = sel.Where(i => i.Size > 0).Sum(i => i.Size);
             string totalText = Util.Fmt(total) + (sel.Any(i => i.Size < 0) ? "+" : "");
 
-            var rows = sel.Select(i => new KeyValuePair<string, string>(i.Name, i.Size < 0 ? "—" : Util.Fmt(i.Size))).ToList();
+            var rows = sel.Select(i => new KeyValuePair<string, string>(i.Name,
+                (i.Size < 0 ? "—" : Util.Fmt(i.Size)) + (i.ToRecycleBin ? "  ♻" : ""))).ToList();
             var running = sel.Where(i => !string.IsNullOrEmpty(i.RunningText)).Select(i => i.RunningText).Distinct().ToList();
             string warn = running.Count > 0 ? "Close " + string.Join(", ", running) + " first, or files in use will be skipped." : null;
 
-            bool ok = await ShowDialog("Delete " + sel.Count + " item" + (sel.Count == 1 ? "" : "s") + "?",
-                "This permanently removes about " + totalText + ". It can't be undone.",
-                rows, warn, "Delete " + totalText, "Cancel", true, false);
-            if (!ok) return;
+            string text;
+            if (rec.Count == 0) text = "This permanently removes about " + totalText + ". It can't be undone.";
+            else if (del.Count == 0) text = "These files go to the Recycle Bin (♻), so you can restore them. Their space is freed when you empty the Recycle Bin.";
+            else text = "Items marked ♻ go to the Recycle Bin, so you can restore them. Everything else is removed permanently.";
+
+            int ok = await ShowDialog((del.Count == 0 ? "Move " : "Delete ") + sel.Count + " item" + (sel.Count == 1 ? "" : "s") + "?",
+                text, rows, warn, (del.Count == 0 ? "Move " : "Delete ") + totalText, "Cancel", true, false, null);
+            if (ok != 1) return;
 
             cleaning = true;
             SetBusy(true);
-            var progressDialog = ShowDialog("Cleaning…", "Please keep Disk Sweep open.", null, null, null, null, false, true);
+            var progressDialog = ShowDialog("Cleaning…", "Please keep Disk Sweep open.", null, null, null, null, false, true, null);
             dlgProgress.Maximum = sel.Count;
             dlgProgress.Value = 0;
-            long freeBefore = Native.FreeBytes();
+            long freeBefore = Native.FreeBytes(selectedDrive);
             var results = new List<KeyValuePair<string, string>>();
             string error = null;
+            long recycled = 0;
             try
             {
                 for (int i = 0; i < sel.Count; i++)
@@ -505,8 +711,13 @@ namespace DiskSweep
                     var it = sel[i];
                     dlgStatus.Text = (i + 1) + " of " + sel.Count + ":  " + it.Name + (it.Mode == Mode.Command ? "  (can take a few minutes)" : "");
                     long freed = await Task.Run(() => Cleaner.Clean(it));
+                    it.CleanedBytes = freed;
                     bool partial = it.Size > 0 && freed < it.Size * 0.9;
-                    results.Add(new KeyValuePair<string, string>(it.Name, Util.Fmt(freed) + (partial ? "  (some in use)" : "")));
+                    if (it.ToRecycleBin) recycled += freed;
+                    string what = it.ToRecycleBin
+                        ? (freed > 0 ? Util.Fmt(freed) + " to Recycle Bin" : "could not move (in use?)")
+                        : Util.Fmt(freed) + (partial ? "  (some in use)" : "");
+                    results.Add(new KeyValuePair<string, string>(it.Name, what));
                     it.Checked = false;
                     dlgProgress.Value = i + 1;
                 }
@@ -514,13 +725,16 @@ namespace DiskSweep
             catch (Exception e) { error = "Stopped early: " + e.Message; }
             cleaning = false;
 
-            long gained = Math.Max(0, Native.FreeBytes() - freeBefore);
+            long gained = Math.Max(0, Native.FreeBytes(selectedDrive) - freeBefore);
+            long cleanedTotal = 0;
+            foreach (var it in sel) cleanedTotal += it.CleanedBytes;
+            if (cleanedTotal > 0) { Settings.History.Add(new HistoryEntry { When = DateTime.Now, Bytes = cleanedTotal, Items = sel.Count }); Settings.Save(); }
             bool anyPartial = results.Any(r => r.Value.Contains("in use"));
-            await ShowDialog("Freed " + Util.Fmt(gained),
-                "Your drive now has " + Util.Fmt(Native.FreeBytes()) + " free.",
-                results,
-                error ?? (anyPartial ? "Some files were in use and were skipped. Close those apps and clean again to get the rest." : null),
-                "Done", null, false, false);
+            string note = error ?? (anyPartial ? "Some files were in use and were skipped. Close those apps and clean again to get the rest." : null);
+            if (note == null && recycled > 0) note = Util.Fmt(recycled) + " is in the Recycle Bin. Empty it to free that space too.";
+            await ShowDialog(del.Count == 0 ? "Moved to Recycle Bin" : "Freed " + Util.Fmt(gained),
+                "Drive " + selectedDrive.TrimEnd('\\') + " now has " + Util.Fmt(Native.FreeBytes(selectedDrive)) + " free.",
+                results, note, "Done", null, false, false, null);
             SetBusy(false);
             Scan();
         }
@@ -536,9 +750,12 @@ namespace DiskSweep
         }
 
         // ---------------------------------------------------------- in-window dialog
-        Task<bool> ShowDialog(string title, string text, List<KeyValuePair<string, string>> rows, string warn,
-                              string okText, string cancelText, bool danger, bool progress)
+        // Returns 1 = OK, 2 = alternative button, 0 = cancel / Esc.
+        Task<int> ShowDialog(string title, string text, List<KeyValuePair<string, string>> rows, string warn,
+                             string okText, string cancelText, bool danger, bool progress, string altText)
         {
+            dlgAlt.Content = altText;
+            dlgAlt.Visibility = altText == null ? Visibility.Collapsed : Visibility.Visible;
             dlgTitle.Text = title;
             dlgText.Text = text;
             dlgList.ItemsSource = rows;
@@ -556,11 +773,11 @@ namespace DiskSweep
             dlgButtons.Visibility = okText == null && cancelText == null ? Visibility.Collapsed : Visibility.Visible;
             overlay.Visibility = Visibility.Visible;
             if (cancelText != null) dlgCancel.Focus(); else if (okText != null) dlgOk.Focus();
-            dlgTcs = new TaskCompletionSource<bool>();
+            dlgTcs = new TaskCompletionSource<int>();
             return dlgTcs.Task;
         }
 
-        void CloseDialog(bool result)
+        void CloseDialog(int result)
         {
             overlay.Visibility = Visibility.Collapsed;
             var t = dlgTcs;
@@ -581,10 +798,11 @@ namespace DiskSweep
             // Developer checks without UI:
             //   DiskSweep.exe --report out.txt [projectFolder]   scan only, write results
             //   DiskSweep.exe --selftest emptyFolder             test delete logic on a fixture
-            if (args.Length >= 2 && args[0] == "--report") return Dev.Report(args);
+            if (args.Length >= 1 && args[0] == "--check-space") return Settings.CheckSpace();   // run by Task Scheduler
+                        if (args.Length >= 2 && args[0] == "--report") return Dev.Report(args);
             if (args.Length >= 2 && args[0] == "--selftest") return Dev.SelfTest(args[1]);
             //   DiskSweep.exe --test-item <folder>                adds that folder as a deletable item (UI testing)
-            if (args.Length >= 2 && args[0] == "--test-item") MainUi.TestItemPath = Path.GetFullPath(args[1]);
+            if (args.Length >= 2 && (args[0] == "--test-item" || args[0] == "--test-recycle")) { MainUi.TestItemPath = Path.GetFullPath(args[1]); MainUi.TestRecycle = args[0] == "--test-recycle"; }
 
             var app = new Application { ShutdownMode = ShutdownMode.OnMainWindowClose };
             app.DispatcherUnhandledException += (s, e) =>

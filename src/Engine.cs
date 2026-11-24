@@ -18,9 +18,9 @@ using System.Threading.Tasks;
 [assembly: System.Reflection.AssemblyDescription("Find and remove junk files on Windows. You choose what goes.")]
 [assembly: System.Reflection.AssemblyProduct("Disk Sweep")]
 [assembly: System.Reflection.AssemblyCopyright("Copyright (c) 2026 Poorya Shadfar. MIT License.")]
-[assembly: System.Reflection.AssemblyVersion("1.0.0.0")]
-[assembly: System.Reflection.AssemblyFileVersion("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersion("1.0.0")]
+[assembly: System.Reflection.AssemblyVersion("1.1.0.0")]
+[assembly: System.Reflection.AssemblyFileVersion("1.1.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersion("1.1.0")]
 
 namespace DiskSweep
 {
@@ -56,6 +56,8 @@ namespace DiskSweep
         public string[] Processes = new string[0];
         public bool Checked;
         public string RunningText;      // apps that should be closed first
+        public long CleanedBytes;       // filled in after cleaning
+        public bool ToRecycleBin;       // move to Recycle Bin instead of deleting (personal files)
         public string Key { get { return Category + "|" + Name; } }
     }
 
@@ -74,19 +76,51 @@ namespace DiskSweep
         [DllImport("user32.dll")]
         public static extern bool SetProcessDPIAware();
 
-        public static long RecycleSize()
+        // root = "D:\" for one drive's Recycle Bin, null for all drives
+        public static long RecycleSize(string root = null)
         {
             var i = new SHQUERYRBINFO();
             i.cbSize = Marshal.SizeOf(typeof(SHQUERYRBINFO));
-            return SHQueryRecycleBin(null, ref i) == 0 ? i.i64Size : 0;
+            return SHQueryRecycleBin(root, ref i) == 0 ? i.i64Size : 0;
         }
 
-        public static void EmptyRecycle() { SHEmptyRecycleBin(IntPtr.Zero, null, 1 | 2 | 4); }
+        public static void EmptyRecycle(string root = null) { SHEmptyRecycleBin(IntPtr.Zero, root, 1 | 2 | 4); }
+
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        struct SHFILEOPSTRUCT
+        {
+            public IntPtr hwnd;
+            public uint wFunc;
+            public string pFrom;
+            public string pTo;
+            public ushort fFlags;
+            public bool fAnyOperationsAborted;
+            public IntPtr hNameMappings;
+            public string lpszProgressTitle;
+        }
+
+        [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+        static extern int SHFileOperation(ref SHFILEOPSTRUCT op);
+
+        // Moves files/folders to the Recycle Bin. Windows asks first if something is too big for the bin
+        // (it would otherwise be deleted for good). True if the operation ran.
+        public static bool Recycle(IEnumerable<string> paths)
+        {
+            var list = paths.Where(p => !string.IsNullOrEmpty(p)).ToList();
+            if (list.Count == 0) return true;
+            var op = new SHFILEOPSTRUCT
+            {
+                wFunc = 3,                                            // FO_DELETE
+                pFrom = string.Join("\0", list) + "\0",               // list ends with a double null
+                fFlags = 0x0040 | 0x0010 | 0x0004 | 0x0400 | 0x4000   // ALLOWUNDO | NOCONFIRMATION | SILENT | NOERRORUI | WANTNUKEWARNING
+            };
+            return SHFileOperation(ref op) == 0 && !op.fAnyOperationsAborted;
+        }
 
         public static string SysRoot { get { return Path.GetPathRoot(Environment.SystemDirectory); } }
 
-        public static long FreeBytes() { try { return new DriveInfo(SysRoot).AvailableFreeSpace; } catch { return 0; } }
-        public static long TotalBytes() { try { return new DriveInfo(SysRoot).TotalSize; } catch { return 0; } }
+        public static long FreeBytes(string root = null) { try { return new DriveInfo(root ?? SysRoot).AvailableFreeSpace; } catch { return 0; } }
+        public static long TotalBytes(string root = null) { try { return new DriveInfo(root ?? SysRoot).TotalSize; } catch { return 0; } }
 
         public static bool IsRunning(string name)
         {
@@ -249,7 +283,7 @@ namespace DiskSweep
     }
 
     // ------------------------------------------------------------------ what to look for
-    static class Scanner
+    static partial class Scanner
     {
         public static bool IsAdmin;
 
@@ -288,8 +322,7 @@ namespace DiskSweep
             string root = Native.SysRoot;
 
             // --- Windows
-            var rb = new CleanItem { Category = CatWin, Name = "Recycle Bin", Info = "Files you already deleted.", Mode = Mode.RecycleBin };
-            l.Add(rb);
+            l.Add(RecycleItem(root));
 
             var tmp = Mk(CatWin, "Your temporary files", "Leftovers from installers and apps. Files changed in the last 24 h are kept.",
                 Safety.Safe, false, Path.GetTempPath().TrimEnd('\\'));
@@ -325,6 +358,12 @@ namespace DiskSweep
                 Safety.Safe, true);
             dism.Mode = Mode.Command; dism.Cmd = P(Environment.SystemDirectory, "Dism.exe"); dism.CmdArgs = "/Online /Cleanup-Image /StartComponentCleanup";
             l.Add(dism);
+
+            // --- driver installers that unpack themselves and never clean up
+            Add(l, Mk(CatGpu, "AMD installer files", "Unpacked AMD driver and chipset installers. AMD Software keeps them after installing. Not needed any more.",
+                Safety.Safe, false, P(root, "AMD")));
+            Add(l, Mk(CatGpu, "NVIDIA installer files", "Unpacked NVIDIA driver installers left on the drive.", Safety.Safe, false, P(root, "NVIDIA")));
+            Add(l, Mk(CatGpu, "Intel installer files", "Unpacked Intel driver installers and their logs.", Safety.Review, false, P(root, "Intel")));
 
             // --- GPU
             Add(l, Mk(CatGpu, "NVIDIA shader cache", "Saved game graphics data. Games may stutter briefly the first time after cleaning.", Safety.Safe, false,
@@ -455,7 +494,7 @@ namespace DiskSweep
 
         public static long SizeOf(CleanItem it)
         {
-            if (it.Mode == Mode.RecycleBin) return Native.RecycleSize();
+            if (it.Mode == Mode.RecycleBin) return Native.RecycleSize(it.Paths.Count > 0 ? it.Paths[0] : null);
             if (it.Mode == Mode.Command && it.Paths.Count == 0) return -1;
             long t = 0;
             foreach (var p in it.Paths) t += Fs.PathSize(p, it.Pattern, it.MinAgeHours, it.Mode == Mode.Whole);
@@ -464,67 +503,42 @@ namespace DiskSweep
             return t;
         }
 
-        public static List<CleanItem> ScanAll(IProgress<string> p)
+        public static CleanItem RecycleItem(string root)
         {
+            var rb = new CleanItem { Category = CatWin, Name = "Recycle Bin", Info = "Files you already deleted.", Mode = Mode.RecycleBin };
+            rb.Paths.Add(root);
+            return rb;
+        }
+
+        // drive = "C:\" etc. The system drive gets everything; other drives get their Recycle Bin and large files.
+        public static List<CleanItem> ScanAll(IProgress<string> p, string drive = null)
+        {
+            drive = drive ?? Native.SysRoot;
+            bool sys = drive.Equals(Native.SysRoot, StringComparison.OrdinalIgnoreCase);
+            if (!sys)
+            {
+                var other = new List<CleanItem> { RecycleItem(drive) };
+                other[0].Size = SizeOf(other[0]);
+                other.AddRange(LargeFiles(p, drive));
+                return other;
+            }
             var list = Build();
             foreach (var it in list)
             {
                 if (p != null) p.Report("Measuring: " + it.Name);
                 it.Size = SizeOf(it);
             }
+            Leftovers(list, p);
+            list.AddRange(LargeFiles(p, drive));
             return list;
         }
 
-        // ---- project node_modules finder
+        // ---- folders never walked by the project / large-file finders
         static readonly HashSet<string> SkipDirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
             ".git", "Windows", "Program Files", "Program Files (x86)", "ProgramData", "AppData",
             "$Recycle.Bin", "System Volume Information", "$WinREAgent", "Recovery"
         };
-
-        public static List<CleanItem> FindProjects(string root, IProgress<string> p)
-        {
-            var found = new List<DirectoryInfo>();
-            Walk(new DirectoryInfo(Fs.Long(root.TrimEnd('\\'))), found, 0, p);
-            var res = new List<CleanItem>();
-            string cat = "Project node_modules";
-            foreach (var nm in found)
-            {
-                string full = nm.FullName.Replace(@"\\?\", "");
-                string proj = Path.GetDirectoryName(full);
-                string rel = proj.Length > root.TrimEnd('\\').Length ? proj.Substring(root.TrimEnd('\\').Length).TrimStart('\\') : Path.GetFileName(proj);
-                DateTime changed = nm.Parent.LastWriteTime;
-                try { var pj = new FileInfo(Fs.Long(Path.Combine(proj, "package.json"))); if (pj.Exists) changed = pj.LastWriteTime; } catch { }
-                var it = new CleanItem
-                {
-                    Category = cat, Name = rel, Mode = Mode.Whole, Safety = Safety.Review,
-                    Info = "In " + root + ". Project last changed " + changed.ToString("yyyy-MM-dd") + ". Your code stays; run npm install to get it back."
-                };
-                it.Paths.Add(full);
-                if (p != null) p.Report("Measuring: " + rel);
-                it.Size = SizeOf(it);
-                res.Add(it);
-            }
-            return res;
-        }
-
-        static void Walk(DirectoryInfo d, List<DirectoryInfo> found, int depth, IProgress<string> p)
-        {
-            if (depth > 10) return;
-            DirectoryInfo[] subs;
-            try { subs = d.GetDirectories(); } catch { return; }
-            if (p != null && depth <= 2) p.Report("Looking in: " + d.FullName.Replace(@"\\?\", ""));
-            foreach (var s in subs)
-            {
-                try
-                {
-                    if (Fs.IsLink(s) || SkipDirs.Contains(s.Name)) continue;
-                    if (s.Name.Equals("node_modules", StringComparison.OrdinalIgnoreCase)) { found.Add(s); continue; }
-                    Walk(s, found, depth + 1, p);
-                }
-                catch { }
-            }
-        }
     }
 
     // ------------------------------------------------------------------ deleting
@@ -536,9 +550,10 @@ namespace DiskSweep
             {
                 case Mode.RecycleBin:
                     {
-                        long before = Native.RecycleSize();
-                        Native.EmptyRecycle();
-                        return Math.Max(0, before - Native.RecycleSize());
+                        string root = it.Paths.Count > 0 ? it.Paths[0] : null;
+                        long before = Native.RecycleSize(root);
+                        Native.EmptyRecycle(root);
+                        return Math.Max(0, before - Native.RecycleSize(root));
                     }
                 case Mode.Command:
                     {
@@ -549,10 +564,36 @@ namespace DiskSweep
                 default:
                     {
                         long freed = 0;
+                        if (it.ToRecycleBin)
+                        {
+                            // Whole: move the folder/file itself. Contents: move what's inside, keep the folder.
+                            var targets = new List<string>();
+                            foreach (var p in it.Paths)
+                            {
+                                if (!Fs.Exists(p)) continue;
+                                if (it.Mode == Mode.Whole || File.Exists(Fs.Long(p))) { targets.Add(p); continue; }
+                                try
+                                {
+                                    var d = new DirectoryInfo(p);
+                                    targets.AddRange((it.Pattern != null ? d.GetFiles(it.Pattern) : d.GetFileSystemInfos()).Select(e => e.FullName));
+                                }
+                                catch { }
+                            }
+                            long before = SizeOfPaths(it);
+                            Native.Recycle(targets);
+                            return Math.Max(0, before - SizeOfPaths(it));
+                        }
                         foreach (var p in it.Paths) freed += Fs.DeletePath(p, it.Pattern, it.MinAgeHours, it.Mode == Mode.Whole);
                         return freed;
                     }
             }
+        }
+
+        static long SizeOfPaths(CleanItem it)
+        {
+            long t = 0;
+            foreach (var p in it.Paths) t += Fs.PathSize(p, it.Pattern, it.MinAgeHours, it.Mode == Mode.Whole);
+            return t;
         }
 
         static void RunHidden(string file, string args)
@@ -572,14 +613,23 @@ namespace DiskSweep
         }
     }
 
+    class FileLog : IProgress<string>
+    {
+        readonly string file; readonly Stopwatch sw = Stopwatch.StartNew();
+        public FileLog(string f) { file = f; File.WriteAllText(f, ""); }
+        public void Report(string s) { File.AppendAllText(file, sw.Elapsed.TotalSeconds.ToString("0.0") + "s  " + s + "\n"); }
+    }
+
     static class Dev
     {
         public static int Report(string[] args)
         {
+            IProgress<string> log = null;
+            if (args.Length >= 3 && args[2] == "--log") log = new FileLog(args[1] + ".log");
             Scanner.IsAdmin = Native.IsAdmin();
             var sw = Stopwatch.StartNew();
-            var list = Scanner.ScanAll(null);
-            if (args.Length >= 3) list.AddRange(Scanner.FindProjects(args[2], null));
+            var list = Scanner.ScanAll(log);
+            if (args.Length >= 3 && args[2] != "--log") list.AddRange(Scanner.FindProjectJunk(args[2], null));
             var sb = new StringBuilder();
             sb.AppendLine("admin=" + Scanner.IsAdmin + " seconds=" + sw.Elapsed.TotalSeconds.ToString("0"));
             foreach (var it in list)
@@ -629,6 +679,19 @@ namespace DiskSweep
                 log.AppendLine("fixture removed: " + fxGone);
                 log.AppendLine("junction target intact: " + keepOk);
                 if (!fxGone || !keepOk || freed != 3000) ok = false;
+
+                // Recycle Bin, "Contents" mode: files go to the bin, the folder itself stays.
+                string rc = Path.Combine(dir, "recycle-contents");
+                Directory.CreateDirectory(Path.Combine(rc, "ds-selftest-sub"));
+                File.WriteAllText(Path.Combine(rc, "ds-selftest-a.txt"), new string('c', 4000));
+                File.WriteAllText(Path.Combine(rc, "ds-selftest-sub", "b.txt"), new string('d', 1000));
+                var rItem = new CleanItem { Mode = Mode.Contents, ToRecycleBin = true };
+                rItem.Paths.Add(rc);
+                long moved = Cleaner.Clean(rItem);
+                bool folderKept = Directory.Exists(rc);
+                bool emptied = folderKept && Directory.GetFileSystemEntries(rc).Length == 0;
+                log.AppendLine("recycled (contents): " + moved + " (expect 5000), folder kept: " + folderKept + ", emptied: " + emptied);
+                if (moved != 5000 || !folderKept || !emptied) ok = false;
             }
             catch (Exception ex) { ok = false; log.AppendLine("ERROR: " + ex); }
             log.AppendLine(ok ? "SELFTEST PASS" : "SELFTEST FAIL");

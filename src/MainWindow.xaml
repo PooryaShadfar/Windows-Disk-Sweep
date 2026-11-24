@@ -169,6 +169,102 @@
       <Setter Property="Margin" Value="10,0,0,0"/>
       <Setter Property="VerticalAlignment" Value="Center"/>
     </Style>
+    <Style x:Key="IconBtn" TargetType="Button" BasedOn="{StaticResource Secondary}">
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="BorderBrush" Value="Transparent"/>
+      <Setter Property="Padding" Value="7"/>
+      <Setter Property="Foreground" Value="{DynamicResource Muted}"/>
+    </Style>
+
+    <!-- Segmented choice (theme) and small chips (drives) -->
+    <Style x:Key="Seg" TargetType="RadioButton">
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Foreground" Value="{DynamicResource Text}"/>
+      <Setter Property="Padding" Value="16,7"/>
+      <Setter Property="Margin" Value="0,0,8,0"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="RadioButton">
+            <Grid>
+              <Border x:Name="bd" CornerRadius="7" BorderThickness="1" BorderBrush="{DynamicResource Line}" Background="{DynamicResource Surface}"/>
+              <Border x:Name="hov" CornerRadius="7" Background="{DynamicResource Text}" Opacity="0"/>
+              <ContentPresenter Margin="{TemplateBinding Padding}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Grid>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="hov" Property="Opacity" Value="0.06"/></Trigger>
+              <Trigger Property="IsChecked" Value="True">
+                <Setter TargetName="bd" Property="Background" Value="{DynamicResource Accent}"/>
+                <Setter TargetName="bd" Property="BorderBrush" Value="{DynamicResource Accent}"/>
+                <Setter Property="Foreground" Value="{DynamicResource AccentFg}"/>
+              </Trigger>
+              <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4"/></Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+    <Style x:Key="Chip" TargetType="RadioButton" BasedOn="{StaticResource Seg}">
+      <Setter Property="Padding" Value="10,3"/>
+      <Setter Property="Margin" Value="6,0,0,0"/>
+      <Setter Property="FontSize" Value="12.5"/>
+    </Style>
+
+    <!-- On/off switch -->
+    <Style x:Key="Switch" TargetType="CheckBox">
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Foreground" Value="{DynamicResource Text}"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="CheckBox">
+            <Grid Background="Transparent">
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+              </Grid.ColumnDefinitions>
+              <ContentPresenter VerticalAlignment="Center" Margin="0,0,20,0"/>
+              <Border x:Name="track" Grid.Column="1" Width="42" Height="22" CornerRadius="11" BorderThickness="1.5"
+                      BorderBrush="{DynamicResource Muted}" Background="Transparent" VerticalAlignment="Center">
+                <Ellipse x:Name="knob" Width="12" Height="12" Fill="{DynamicResource Muted}" HorizontalAlignment="Left" Margin="4,0"/>
+              </Border>
+            </Grid>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsChecked" Value="True">
+                <Setter TargetName="track" Property="Background" Value="{DynamicResource Accent}"/>
+                <Setter TargetName="track" Property="BorderBrush" Value="{DynamicResource Accent}"/>
+                <Setter TargetName="knob" Property="Fill" Value="{DynamicResource AccentFg}"/>
+                <Setter TargetName="knob" Property="HorizontalAlignment" Value="Right"/>
+              </Trigger>
+              <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.45"/></Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <Style x:Key="Section" TargetType="TextBlock">
+      <Setter Property="FontFamily" Value="{StaticResource Display}"/>
+      <Setter Property="FontSize" Value="16"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="Margin" Value="0,22,0,10"/>
+    </Style>
+
+    <Style x:Key="Field" TargetType="TextBox">
+      <Setter Property="Background" Value="{DynamicResource Bg}"/>
+      <Setter Property="Foreground" Value="{DynamicResource Text}"/>
+      <Setter Property="BorderBrush" Value="{DynamicResource Line}"/>
+      <Setter Property="CaretBrush" Value="{DynamicResource Text}"/>
+      <Setter Property="Padding" Value="8,5"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="TextBox">
+            <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="6">
+              <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}"/>
+            </Border>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
   </Window.Resources>
 
   <Grid>
@@ -209,11 +305,15 @@
           </StackPanel>
         </Button>
         <Button x:Name="BtnFolder" Style="{StaticResource Secondary}" Margin="0,0,10,0"
-                ToolTip="Pick your code folder. Disk Sweep lists every node_modules folder inside it.">
+                ToolTip="Add your code folders. Disk Sweep then lists node_modules, build caches and build output inside them.">
           <StackPanel Orientation="Horizontal">
             <TextBlock Text="&#xE8B7;" Style="{StaticResource Glyph}" Margin="0,0,8,0"/>
-            <TextBlock Text="Find node_modules"/>
+            <TextBlock Text="Code folders"/>
           </StackPanel>
+        </Button>
+        <Button x:Name="BtnSettings" Style="{StaticResource Secondary}" Margin="0,0,10,0" Padding="11,8"
+                ToolTip="Settings" AutomationProperties.Name="Settings">
+          <TextBlock Text="&#xE713;" Style="{StaticResource Glyph}"/>
         </Button>
         <Button x:Name="BtnScan" Style="{StaticResource Primary}">
           <StackPanel Orientation="Horizontal">
@@ -235,10 +335,23 @@
       </Grid.ColumnDefinitions>
       <Border Style="{StaticResource Card}">
         <StackPanel>
-          <StackPanel Orientation="Horizontal">
-            <TextBlock Text="&#xEDA2;" Style="{StaticResource Glyph}" FontSize="13" Foreground="{DynamicResource Muted}" Margin="0,0,8,0"/>
-            <TextBlock x:Name="DriveLabel" Text="Drive C:" Style="{StaticResource Caption}"/>
-          </StackPanel>
+          <Grid>
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+              <TextBlock Text="&#xEDA2;" Style="{StaticResource Glyph}" FontSize="13" Foreground="{DynamicResource Muted}" Margin="0,0,8,0"/>
+              <TextBlock x:Name="DriveLabel" Text="Drive C:" Style="{StaticResource Caption}"/>
+            </StackPanel>
+            <ItemsControl x:Name="Drives" HorizontalAlignment="Right" Margin="0,-4,0,-4" AutomationProperties.Name="Drives">
+              <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate>
+              </ItemsControl.ItemsPanel>
+              <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                  <RadioButton Style="{StaticResource Chip}" GroupName="drives" Content="{Binding Label}"
+                               IsChecked="{Binding IsSelected, Mode=OneWay}" ToolTip="{Binding Tip}"/>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </Grid>
           <TextBlock x:Name="DriveFree" Text="…" Style="{StaticResource Big}"/>
           <ProgressBar x:Name="DriveBar" Style="{StaticResource Bar}" Maximum="100" Margin="0,10,0,8"/>
           <TextBlock x:Name="DriveSub" Style="{StaticResource Caption}"/>
@@ -384,12 +497,20 @@
                       <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
                       </Grid.ColumnDefinitions>
                       <StackPanel>
                         <StackPanel Orientation="Horizontal">
                           <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
                           <Border Style="{StaticResource Badge}" Background="{Binding BadgeBg}">
                             <TextBlock Text="{Binding BadgeText}" Foreground="{Binding BadgeFg}" FontSize="11.5" FontWeight="SemiBold"/>
+                          </Border>
+                          <Border Style="{StaticResource Badge}" Margin="6,0,0,0" Background="{DynamicResource AdminBg}" Visibility="{Binding RecycleVis}">
+                            <StackPanel Orientation="Horizontal">
+                              <TextBlock Text="&#xE74D;" FontFamily="{StaticResource Icons}" FontSize="10" Foreground="{DynamicResource AdminFg}"
+                                         VerticalAlignment="Center" Margin="0,0,4,0"/>
+                              <TextBlock Text="To Recycle Bin" Foreground="{DynamicResource AdminFg}" FontSize="11.5" FontWeight="SemiBold"/>
+                            </StackPanel>
                           </Border>
                           <Border Style="{StaticResource Badge}" Margin="6,0,0,0" Background="{DynamicResource AdminBg}" Visibility="{Binding AdminVis}">
                             <StackPanel Orientation="Horizontal">
@@ -408,6 +529,10 @@
                       </StackPanel>
                       <TextBlock Grid.Column="1" Text="{Binding SizeText}" FontFamily="{StaticResource Display}" FontSize="17"
                                  FontWeight="SemiBold" VerticalAlignment="Center" Margin="20,0,4,0"/>
+                      <Button Grid.Column="2" Tag="hide" Style="{StaticResource IconBtn}" Margin="6,0,0,0" VerticalAlignment="Center"
+                              ToolTip="Don't show this again (undo in Settings)" AutomationProperties.Name="Hide this item">
+                        <TextBlock Text="&#xED1A;" FontFamily="{StaticResource Icons}" FontSize="14"/>
+                      </Button>
                     </Grid>
                   </CheckBox>
                 </DataTemplate>
@@ -482,6 +607,107 @@
       </Grid>
     </Border>
 
+    <!-- Settings -->
+    <Grid x:Name="SettingsOverlay" Grid.RowSpan="4" Background="#8C000000" Visibility="Collapsed">
+      <Border Background="{DynamicResource Surface}" CornerRadius="14" Width="640" Margin="24"
+              HorizontalAlignment="Center" VerticalAlignment="Center" BorderBrush="{DynamicResource Line}" BorderThickness="1">
+        <Border.Effect>
+          <DropShadowEffect BlurRadius="40" ShadowDepth="10" Opacity="0.35"/>
+        </Border.Effect>
+        <DockPanel>
+          <Grid DockPanel.Dock="Top" Margin="28,20,18,4">
+            <TextBlock Text="Settings" FontFamily="{StaticResource Display}" FontSize="24" FontWeight="SemiBold" VerticalAlignment="Center"/>
+            <Button x:Name="BtnCloseSettings" Style="{StaticResource IconBtn}" HorizontalAlignment="Right" ToolTip="Close"
+                    AutomationProperties.Name="Close settings">
+              <TextBlock Text="&#xE711;" FontFamily="{StaticResource Icons}" FontSize="14"/>
+            </Button>
+          </Grid>
+          <ScrollViewer VerticalScrollBarVisibility="Auto" MaxHeight="620">
+            <StackPanel Margin="28,0,28,26">
+
+              <TextBlock Text="Appearance" Style="{StaticResource Section}" Margin="0,8,0,10"/>
+              <StackPanel Orientation="Horizontal">
+                <RadioButton x:Name="ThemeSystem" Style="{StaticResource Seg}" GroupName="theme" Content="Same as Windows"/>
+                <RadioButton x:Name="ThemeLight" Style="{StaticResource Seg}" GroupName="theme" Content="Light"/>
+                <RadioButton x:Name="ThemeDark" Style="{StaticResource Seg}" GroupName="theme" Content="Dark"/>
+              </StackPanel>
+
+              <TextBlock Text="Safety" Style="{StaticResource Section}"/>
+              <CheckBox x:Name="OptRecycle" Style="{StaticResource Switch}">
+                <StackPanel>
+                  <TextBlock Text="Send &quot;Check first&quot; items to the Recycle Bin" FontWeight="SemiBold"/>
+                  <TextBlock Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,2,0,0"
+                             Text="So you can restore them if you change your mind. Large files always go there."/>
+                </StackPanel>
+              </CheckBox>
+
+              <TextBlock Text="Low-space alert" Style="{StaticResource Section}"/>
+              <CheckBox x:Name="OptAlert" Style="{StaticResource Switch}">
+                <StackPanel>
+                  <TextBlock Text="Warn me when a drive is running out of space" FontWeight="SemiBold"/>
+                  <TextBlock Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,2,0,0"
+                             Text="Checks every 3 hours while you're signed in and shows a Windows notification. Uses Task Scheduler, nothing runs in the background."/>
+                </StackPanel>
+              </CheckBox>
+              <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                <TextBlock Text="Warn when free space is below" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                <TextBox x:Name="AlertGB" Style="{StaticResource Field}" Width="64" TextAlignment="Right" MaxLength="4"
+                         AutomationProperties.Name="Warning limit in GB"/>
+                <TextBlock Text="GB" VerticalAlignment="Center" Margin="8,0,0,0"/>
+              </StackPanel>
+              <TextBlock x:Name="AlertStatus" Style="{StaticResource Caption}" Margin="0,8,0,0" TextWrapping="Wrap"/>
+
+              <TextBlock Text="Hidden items" Style="{StaticResource Section}"/>
+              <TextBlock x:Name="HiddenEmpty" Style="{StaticResource Caption}" TextWrapping="Wrap"
+                         Text="Nothing hidden. Use the eye button on an item to stop seeing it."/>
+              <ItemsControl x:Name="HiddenList">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate>
+                    <Grid Margin="0,3">
+                      <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                      </Grid.ColumnDefinitions>
+                      <TextBlock Text="{Binding Value}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                      <Button Grid.Column="1" Tag="unhide" Style="{StaticResource Subtle}" Content="Show again" Padding="10,5"/>
+                    </Grid>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+
+              <TextBlock Text="History" Style="{StaticResource Section}"/>
+              <TextBlock x:Name="HistTotal" FontFamily="{StaticResource Display}" FontSize="22" FontWeight="SemiBold" Foreground="{DynamicResource Accent}"/>
+              <TextBlock x:Name="HistSub" Style="{StaticResource Caption}" Margin="0,2,0,8"/>
+              <ItemsControl x:Name="HistList">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate>
+                    <Grid Margin="0,3">
+                      <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                      </Grid.ColumnDefinitions>
+                      <TextBlock Text="{Binding Key}" Foreground="{DynamicResource Muted}"/>
+                      <TextBlock Grid.Column="1" Text="{Binding Value}" FontWeight="SemiBold"/>
+                    </Grid>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+              <Button x:Name="BtnClearHist" Style="{StaticResource Subtle}" Content="Clear history" HorizontalAlignment="Left" Margin="-14,6,0,0"/>
+
+              <TextBlock Text="About" Style="{StaticResource Section}"/>
+              <TextBlock x:Name="AboutText" Style="{StaticResource Caption}" TextWrapping="Wrap"/>
+              <Button x:Name="BtnGitHub" Style="{StaticResource Secondary}" HorizontalAlignment="Left" Margin="0,10,0,0">
+                <StackPanel Orientation="Horizontal">
+                  <TextBlock Text="&#xE8A7;" Style="{StaticResource Glyph}" Margin="0,0,8,0"/>
+                  <TextBlock Text="Open on GitHub"/>
+                </StackPanel>
+              </Button>
+            </StackPanel>
+          </ScrollViewer>
+        </DockPanel>
+      </Border>
+    </Grid>
+
     <!-- Dialog overlay (confirm / progress / result) -->
     <Grid x:Name="Overlay" Grid.RowSpan="4" Background="#8C000000" Visibility="Collapsed">
       <Border Background="{DynamicResource Surface}" CornerRadius="14" Padding="28,24" Width="540"
@@ -517,6 +743,7 @@
           <ProgressBar x:Name="DlgProgress" Style="{StaticResource Bar}" Margin="0,20,0,0"/>
           <TextBlock x:Name="DlgStatus" Style="{StaticResource Caption}" Margin="0,8,0,0" TextTrimming="CharacterEllipsis"/>
           <StackPanel x:Name="DlgButtons" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,24,0,0">
+            <Button x:Name="DlgAlt" Style="{StaticResource Subtle}" Margin="0,0,10,0" Visibility="Collapsed"/>
             <Button x:Name="DlgCancel" Style="{StaticResource Secondary}" Content="Cancel" Margin="0,0,10,0" MinWidth="96"/>
             <Button x:Name="DlgOk" Style="{StaticResource Danger}" Content="Delete" MinWidth="96"/>
           </StackPanel>
