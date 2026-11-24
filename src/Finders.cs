@@ -307,6 +307,37 @@ namespace DiskSweep
 
         class Junk { public DirectoryInfo Dir; public string Kind; }
 
+        public static int RecentProjectsKept;   // reset by the caller before a scan
+
+        // Last sign of work on a project: its own files, the git index (commits, checkouts),
+        // the lock files, and when its packages were last installed.
+        static DateTime ProjectActivity(string proj, DirectoryInfo junk)
+        {
+            DateTime t = DateTime.MinValue;
+            Action<DateTime> seen = x => { if (x > t) t = x; };
+            try
+            {
+                var d = new DirectoryInfo(Fs.Long(proj));
+                seen(d.LastWriteTime);
+                foreach (var f in d.GetFiles()) seen(f.LastWriteTime);
+                foreach (var name in new[] { @".git\index", @".git\HEAD", @".git\FETCH_HEAD", @"node_modules\.package-lock.json",
+                                            @"node_modules\.modules.yaml", @"node_modules\.yarn-integrity" })
+                {
+                    var f = new FileInfo(Fs.Long(Path.Combine(proj, name)));
+                    if (f.Exists) seen(f.LastWriteTime);
+                }
+                // Source folders one level down (src, app, pages, ...), skipping build output.
+                foreach (var sub in d.GetDirectories())
+                {
+                    if (sub.FullName == junk.FullName || Fs.IsLink(sub) || SkipDirs.Contains(sub.Name)) continue;
+                    if (sub.Name.StartsWith(".") || sub.Name.Equals("node_modules", StringComparison.OrdinalIgnoreCase)) continue;
+                    seen(sub.LastWriteTime);
+                }
+            }
+            catch { }
+            return t == DateTime.MinValue ? junk.Parent.LastWriteTime : t;
+        }
+
         public static List<CleanItem> FindProjectJunk(string root, IProgress<string> p)
         {
             root = root.TrimEnd('\\');
@@ -320,7 +351,9 @@ namespace DiskSweep
                 string full = j.Dir.FullName.StartsWith(@"\\?\") ? j.Dir.FullName.Substring(4) : j.Dir.FullName;
                 string proj = Path.GetDirectoryName(full);
                 string rel = proj.Length > root.Length ? proj.Substring(root.Length).TrimStart('\\') : Path.GetFileName(proj);
-                DateTime changed = j.Dir.Parent.LastWriteTime;
+                DateTime changed = ProjectActivity(proj, j.Dir);
+                // Recently used project: keep its packages and build output.
+                if (Settings.ProjectDays > 0 && changed > DateTime.Now.AddDays(-Settings.ProjectDays)) { RecentProjectsKept++; continue; }
                 string hint; Safety s = Safety.Safe;
                 switch (j.Kind)
                 {

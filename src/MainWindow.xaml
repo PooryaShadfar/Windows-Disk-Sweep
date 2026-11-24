@@ -242,6 +242,31 @@
       </Setter>
     </Style>
 
+    <Style x:Key="NavRadio" TargetType="RadioButton">
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Foreground" Value="{DynamicResource Text}"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="RadioButton">
+            <Border x:Name="bd" CornerRadius="8" Padding="12,10" Margin="0,1" Background="Transparent">
+              <Grid>
+                <Border x:Name="pill" Width="3" Height="16" CornerRadius="1.5" Background="{DynamicResource Accent}"
+                        HorizontalAlignment="Left" Margin="-12,0,0,0" Visibility="Collapsed"/>
+                <ContentPresenter/>
+              </Grid>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="bd" Property="Background" Value="{DynamicResource Hover}"/></Trigger>
+              <Trigger Property="IsChecked" Value="True">
+                <Setter TargetName="bd" Property="Background" Value="{DynamicResource Selected}"/>
+                <Setter TargetName="pill" Property="Visibility" Value="Visible"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
     <Style x:Key="Section" TargetType="TextBlock">
       <Setter Property="FontFamily" Value="{StaticResource Display}"/>
       <Setter Property="FontSize" Value="16"/>
@@ -297,11 +322,16 @@
         </StackPanel>
       </StackPanel>
       <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-        <Button x:Name="BtnAdmin" Style="{StaticResource Secondary}" Margin="0,0,10,0"
-                ToolTip="Some system folders can only be cleaned with administrator rights.">
+        <Button x:Name="BtnAdmin" Style="{StaticResource Secondary}" Margin="0,0,10,0" Padding="11,8"
+                ToolTip="Run as administrator: some system folders, drive health details and Windows compression need it."
+                AutomationProperties.Name="Run as administrator">
+          <TextBlock Text="&#xEA18;" Style="{StaticResource Glyph}"/>
+        </Button>
+        <Button x:Name="BtnTools" Style="{StaticResource Secondary}" Margin="0,0,10,0"
+                ToolTip="Space map, apps by size, move a folder to another drive, compression">
           <StackPanel Orientation="Horizontal">
-            <TextBlock Text="&#xEA18;" Style="{StaticResource Glyph}" Margin="0,0,8,0"/>
-            <TextBlock Text="Run as administrator"/>
+            <TextBlock Text="&#xE90F;" Style="{StaticResource Glyph}" Margin="0,0,8,0"/>
+            <TextBlock Text="Tools"/>
           </StackPanel>
         </Button>
         <Button x:Name="BtnFolder" Style="{StaticResource Secondary}" Margin="0,0,10,0"
@@ -623,6 +653,238 @@
       </Grid>
     </Border>
 
+    <!-- Tools -->
+    <Grid x:Name="ToolsOverlay" Grid.RowSpan="4" Background="#8C000000" Visibility="Collapsed">
+      <Border Background="{DynamicResource Bg}" CornerRadius="14" Margin="36,28" BorderBrush="{DynamicResource Line}" BorderThickness="1">
+        <Border.Effect>
+          <DropShadowEffect BlurRadius="40" ShadowDepth="10" Opacity="0.35"/>
+        </Border.Effect>
+        <Grid>
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="230"/>
+            <ColumnDefinition Width="*"/>
+          </Grid.ColumnDefinitions>
+          <Border Background="{DynamicResource Surface}" CornerRadius="14,0,0,14" BorderBrush="{DynamicResource Line}" BorderThickness="0,0,1,0">
+            <StackPanel Margin="14,22,14,14">
+              <TextBlock Text="Tools" FontFamily="{StaticResource Display}" FontSize="22" FontWeight="SemiBold" Margin="10,0,0,14"/>
+              <RadioButton x:Name="ToolMap" AutomationProperties.Name="Space map" Style="{StaticResource NavRadio}" GroupName="tools">
+                <StackPanel Orientation="Horizontal">
+                  <TextBlock Text="&#xE80A;" Style="{StaticResource Glyph}" Width="28" Foreground="{DynamicResource Muted}"/>
+                  <TextBlock Text="Space map"/>
+                </StackPanel>
+              </RadioButton>
+              <RadioButton x:Name="ToolApps" AutomationProperties.Name="Apps by size" Style="{StaticResource NavRadio}" GroupName="tools">
+                <StackPanel Orientation="Horizontal">
+                  <TextBlock Text="&#xE71D;" Style="{StaticResource Glyph}" Width="28" Foreground="{DynamicResource Muted}"/>
+                  <TextBlock Text="Apps by size"/>
+                </StackPanel>
+              </RadioButton>
+              <RadioButton x:Name="ToolMove" AutomationProperties.Name="Move a folder" Style="{StaticResource NavRadio}" GroupName="tools">
+                <StackPanel Orientation="Horizontal">
+                  <TextBlock Text="&#xE8DE;" Style="{StaticResource Glyph}" Width="28" Foreground="{DynamicResource Muted}"/>
+                  <TextBlock Text="Move a folder"/>
+                </StackPanel>
+              </RadioButton>
+              <RadioButton x:Name="ToolCompress" AutomationProperties.Name="Compress" Style="{StaticResource NavRadio}" GroupName="tools">
+                <StackPanel Orientation="Horizontal">
+                  <TextBlock Text="&#xE73F;" Style="{StaticResource Glyph}" Width="28" Foreground="{DynamicResource Muted}"/>
+                  <TextBlock Text="Compress"/>
+                </StackPanel>
+              </RadioButton>
+            </StackPanel>
+          </Border>
+
+          <Grid Grid.Column="1" Margin="26,20,18,20">
+            <Grid.RowDefinitions>
+              <RowDefinition Height="Auto"/>
+              <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+            <Grid Margin="0,0,0,14">
+              <StackPanel Margin="0,0,44,0">
+                <TextBlock x:Name="ToolTitle" FontFamily="{StaticResource Display}" FontSize="22" FontWeight="SemiBold"/>
+                <TextBlock x:Name="ToolSub" Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,4,0,0"/>
+              </StackPanel>
+              <Button x:Name="BtnCloseTools" Style="{StaticResource IconBtn}" HorizontalAlignment="Right" VerticalAlignment="Top"
+                      ToolTip="Close" AutomationProperties.Name="Close tools">
+                <TextBlock Text="&#xE711;" FontFamily="{StaticResource Icons}" FontSize="14"/>
+              </Button>
+            </Grid>
+
+            <!-- Space map -->
+            <DockPanel x:Name="MapPanel" Grid.Row="1">
+              <Grid DockPanel.Dock="Top" Margin="0,0,0,10">
+                <StackPanel Orientation="Horizontal">
+                  <Button x:Name="MapUp" Style="{StaticResource Secondary}" Margin="0,0,8,0" ToolTip="Up one level" AutomationProperties.Name="Up one level">
+                    <StackPanel Orientation="Horizontal">
+                      <TextBlock Text="&#xE74A;" Style="{StaticResource Glyph}" Margin="0,0,6,0"/>
+                      <TextBlock Text="Up"/>
+                    </StackPanel>
+                  </Button>
+                  <Button x:Name="MapPick" Style="{StaticResource Secondary}" Content="Choose folder…" Margin="0,0,8,0"/>
+                  <Button x:Name="MapOpen" Style="{StaticResource Secondary}" Content="Open in Explorer" Margin="0,0,14,0"/>
+                </StackPanel>
+                <TextBlock x:Name="MapPath" HorizontalAlignment="Right" VerticalAlignment="Center" FontWeight="SemiBold"
+                           TextTrimming="CharacterEllipsis" MaxWidth="380"/>
+              </Grid>
+              <TextBlock x:Name="MapStatus" DockPanel.Dock="Bottom" Style="{StaticResource Caption}" Margin="0,8,0,0" TextTrimming="CharacterEllipsis"/>
+              <Border x:Name="MapHost" Background="{DynamicResource Surface}" CornerRadius="10" BorderBrush="{DynamicResource Line}" BorderThickness="1" ClipToBounds="True">
+                <Canvas x:Name="MapCanvas"/>
+              </Border>
+            </DockPanel>
+
+            <!-- Apps by size -->
+            <DockPanel x:Name="AppsPanel" Grid.Row="1" Visibility="Collapsed">
+              <Grid DockPanel.Dock="Top" Margin="0,0,0,10">
+                <TextBlock x:Name="AppsSummary" VerticalAlignment="Center" FontWeight="SemiBold"/>
+                <Button x:Name="AppsStore" Style="{StaticResource Secondary}" HorizontalAlignment="Right"
+                        ToolTip="Microsoft Store apps are listed in Windows Settings">
+                  <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="&#xE8A7;" Style="{StaticResource Glyph}" Margin="0,0,8,0"/>
+                    <TextBlock Text="Store apps in Windows Settings"/>
+                  </StackPanel>
+                </Button>
+              </Grid>
+              <Border Background="{DynamicResource Surface}" CornerRadius="10" BorderBrush="{DynamicResource Line}" BorderThickness="1" Padding="6,4,2,4">
+                <ListBox x:Name="AppsList" Background="Transparent" BorderThickness="0" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                         ScrollViewer.CanContentScroll="False" Foreground="{DynamicResource Text}" AutomationProperties.Name="Installed apps">
+                  <ListBox.ItemContainerStyle>
+                    <Style TargetType="ListBoxItem">
+                      <Setter Property="Focusable" Value="False"/>
+                      <Setter Property="Template">
+                        <Setter.Value>
+                          <ControlTemplate TargetType="ListBoxItem"><ContentPresenter/></ControlTemplate>
+                        </Setter.Value>
+                      </Setter>
+                    </Style>
+                  </ListBox.ItemContainerStyle>
+                  <ListBox.ItemTemplate>
+                    <DataTemplate>
+                      <Border Padding="12,9" Margin="0,1,6,1" CornerRadius="8" Background="Transparent">
+                        <Grid>
+                          <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="110"/>
+                            <ColumnDefinition Width="Auto"/>
+                          </Grid.ColumnDefinitions>
+                          <StackPanel>
+                            <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                            <TextBlock Text="{Binding Sub}" Style="{StaticResource Caption}" TextTrimming="CharacterEllipsis" Margin="0,2,0,0"/>
+                          </StackPanel>
+                          <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                            <TextBlock Text="{Binding SizeText}" FontFamily="{StaticResource Display}" FontSize="16" FontWeight="SemiBold" HorizontalAlignment="Right"/>
+                            <ProgressBar Style="{StaticResource Bar}" Height="4" Maximum="100" Value="{Binding Share, Mode=OneWay}" Margin="14,5,0,0"/>
+                          </StackPanel>
+                          <Button Grid.Column="2" Tag="uninstall" Style="{StaticResource Subtle}" Content="Uninstall…" Margin="14,0,0,0"
+                                  VerticalAlignment="Center" AutomationProperties.Name="{Binding Name}"/>
+                        </Grid>
+                      </Border>
+                    </DataTemplate>
+                  </ListBox.ItemTemplate>
+                </ListBox>
+              </Border>
+            </DockPanel>
+
+            <!-- Move a folder -->
+            <ScrollViewer x:Name="MovePanel" Grid.Row="1" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
+              <StackPanel MaxWidth="720" HorizontalAlignment="Left">
+                <TextBlock Text="1.  Folder to move" Style="{StaticResource Section}" Margin="0,0,0,10"/>
+                <WrapPanel>
+                  <Button x:Name="MoveDownloads" Style="{StaticResource Secondary}" Margin="0,0,8,8">
+                    <StackPanel Orientation="Horizontal">
+                      <TextBlock Text="&#xE896;" Style="{StaticResource Glyph}" Margin="0,0,8,0"/>
+                      <TextBlock Text="Downloads"/>
+                    </StackPanel>
+                  </Button>
+                  <Button x:Name="MoveNpm" Style="{StaticResource Secondary}" Margin="0,0,8,8">
+                    <StackPanel Orientation="Horizontal">
+                      <TextBlock Text="&#xE943;" Style="{StaticResource Glyph}" Margin="0,0,8,0"/>
+                      <TextBlock Text="npm cache"/>
+                    </StackPanel>
+                  </Button>
+                  <Button x:Name="MovePick" Style="{StaticResource Secondary}" Margin="0,0,8,8">
+                    <StackPanel Orientation="Horizontal">
+                      <TextBlock Text="&#xE8B7;" Style="{StaticResource Glyph}" Margin="0,0,8,0"/>
+                      <TextBlock Text="Other folder…"/>
+                    </StackPanel>
+                  </Button>
+                </WrapPanel>
+                <TextBlock x:Name="MoveSrc" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,4,0,0"/>
+
+                <TextBlock Text="2.  Move it to" Style="{StaticResource Section}" Margin="0,22,0,10"/>
+                <ItemsControl x:Name="MoveDrives">
+                  <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate>
+                  </ItemsControl.ItemsPanel>
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                      <RadioButton Style="{StaticResource Seg}" GroupName="movedrive" Content="{Binding Label}" IsChecked="{Binding IsSelected, Mode=OneWay}"
+                                   Margin="0,0,8,8"/>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <TextBlock x:Name="MoveTarget" Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,4,0,0"/>
+
+                <Border Background="{DynamicResource Surface}" CornerRadius="10" BorderBrush="{DynamicResource Line}" BorderThickness="1" Padding="16,12" Margin="0,20,0,0">
+                  <TextBlock Style="{StaticResource Caption}" TextWrapping="Wrap"
+                             Text="How it works: Disk Sweep copies the folder to the other drive, checks the copy, then leaves a link in the old place so apps still find it. Downloads is moved the Windows way, so Explorer shows the new place. Steam games: use Steam > Settings > Storage instead."/>
+                </Border>
+                <TextBlock x:Name="MoveHint" TextWrapping="Wrap" Foreground="{DynamicResource WarnFg}" Margin="0,12,0,0"/>
+                <StackPanel Orientation="Horizontal" Margin="0,16,0,0">
+                  <Button x:Name="MoveGo" Style="{StaticResource Primary}" IsEnabled="False">
+                    <StackPanel Orientation="Horizontal">
+                      <TextBlock Text="&#xE8DE;" Style="{StaticResource Glyph}" Margin="0,0,8,0"/>
+                      <TextBlock Text="Move folder"/>
+                    </StackPanel>
+                  </Button>
+                  <TextBlock x:Name="MoveStatus" Style="{StaticResource Caption}" VerticalAlignment="Center" Margin="14,0,0,0" TextWrapping="Wrap" MaxWidth="460"/>
+                </StackPanel>
+              </StackPanel>
+            </ScrollViewer>
+
+            <!-- Compress -->
+            <ScrollViewer x:Name="CompressPanel" Grid.Row="1" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
+              <StackPanel MaxWidth="720" HorizontalAlignment="Left">
+                <Border Style="{StaticResource Card}">
+                  <StackPanel>
+                    <TextBlock Text="Compress Windows system files" FontWeight="SemiBold" FontSize="15"/>
+                    <TextBlock Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,4,0,0"
+                               Text="Windows' own CompactOS feature. Usually saves 2–5 GB. Windows keeps working as normal; very old or slow PCs may notice a little extra CPU use. Can be undone with: compact /CompactOS:never"/>
+                    <TextBlock x:Name="CompactOsText" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,12,0,0"/>
+                    <Button x:Name="CompactOsGo" Style="{StaticResource Primary}" HorizontalAlignment="Left" Margin="0,12,0,0">
+                      <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE73F;" Style="{StaticResource Glyph}" Margin="0,0,8,0"/>
+                        <TextBlock Text="Compress Windows"/>
+                      </StackPanel>
+                    </Button>
+                  </StackPanel>
+                </Border>
+                <Border Style="{StaticResource Card}" Margin="0,14,0,0">
+                  <StackPanel>
+                    <TextBlock Text="Compress a folder" FontWeight="SemiBold" FontSize="15"/>
+                    <TextBlock Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,4,0,0"
+                               Text="Best for folders you rarely use, like old projects, archives or tools. Files keep working as normal; Windows unpacks them when opened. Already-compressed files (zip, video, photos) won't shrink much."/>
+                    <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                      <Button x:Name="CompPick" Style="{StaticResource Secondary}" Content="Choose folder…" Margin="0,0,12,0"/>
+                      <TextBlock x:Name="CompSrc" FontWeight="SemiBold" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="440"/>
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                      <Button x:Name="CompGo" Style="{StaticResource Primary}" IsEnabled="False">
+                        <StackPanel Orientation="Horizontal">
+                          <TextBlock Text="&#xE73F;" Style="{StaticResource Glyph}" Margin="0,0,8,0"/>
+                          <TextBlock Text="Compress folder"/>
+                        </StackPanel>
+                      </Button>
+                      <TextBlock x:Name="CompStatus" Style="{StaticResource Caption}" VerticalAlignment="Center" Margin="14,0,0,0" TextWrapping="Wrap" MaxWidth="440"/>
+                    </StackPanel>
+                  </StackPanel>
+                </Border>
+              </StackPanel>
+            </ScrollViewer>
+          </Grid>
+        </Grid>
+      </Border>
+    </Grid>
+
     <!-- Drive health -->
     <Grid x:Name="HealthOverlay" Grid.RowSpan="4" Background="#8C000000" Visibility="Collapsed">
       <Border Background="{DynamicResource Bg}" CornerRadius="14" Width="780" Margin="24"
@@ -769,6 +1031,22 @@
                 <TextBlock Text="GB" VerticalAlignment="Center" Margin="8,0,0,0"/>
               </StackPanel>
               <TextBlock x:Name="AlertStatus" Style="{StaticResource Caption}" Margin="0,8,0,0" TextWrapping="Wrap"/>
+
+              <TextBlock Text="Developers" Style="{StaticResource Section}"/>
+              <StackPanel Orientation="Horizontal">
+                <TextBlock Text="Package caches (npm, pnpm, Yarn, Bun): keep what was used in the last" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                <TextBox x:Name="CacheDays" Style="{StaticResource Field}" Width="54" TextAlignment="Right" MaxLength="3"
+                         AutomationProperties.Name="Days to keep package caches"/>
+                <TextBlock Text="days" VerticalAlignment="Center" Margin="8,0,0,0"/>
+              </StackPanel>
+              <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                <TextBlock Text="Build folders: skip projects you worked on in the last" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                <TextBox x:Name="ProjectDays" Style="{StaticResource Field}" Width="54" TextAlignment="Right" MaxLength="3"
+                         AutomationProperties.Name="Days a project counts as recent"/>
+                <TextBlock Text="days" VerticalAlignment="Center" Margin="8,0,0,0"/>
+              </StackPanel>
+              <TextBlock Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,8,0,0"
+                         Text="So packages for the project you're working on stay. 0 turns the rule off. Applies on the next scan."/>
 
               <TextBlock Text="Hidden items" Style="{StaticResource Section}"/>
               <TextBlock x:Name="HiddenEmpty" Style="{StaticResource Caption}" TextWrapping="Wrap"

@@ -119,7 +119,7 @@ namespace DiskSweep
             IsAvailable = available;
             Group = group;
             chk = it.Checked && available;
-            if (!available) Warning = "Needs administrator rights. Click \"Run as administrator\" at the top.";
+            if (!available) Warning = "Needs administrator rights. Click the shield button at the top to run as administrator.";
             else if (!string.IsNullOrEmpty(it.RunningText)) Warning = "Close " + it.RunningText + " first, or files in use are skipped.";
             if (it.Size < 0 && available && it.Mode == Mode.Command) Warning = "Size is only known after cleaning.";
             var paths = it.Paths.Where(Fs.Exists).Take(10).ToList();
@@ -277,7 +277,7 @@ namespace DiskSweep
     }
 
     // ------------------------------------------------------------------ main window logic
-    class MainUi
+    partial class MainUi
     {
         [DllImport("dwmapi.dll")]
         static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
@@ -297,7 +297,7 @@ namespace DiskSweep
         ItemsControl drivesCtl, hiddenList, histList;
         RadioButton themeSystem, themeLight, themeDark;
         CheckBox optRecycle, optAlert;
-        TextBox alertGB;
+        TextBox alertGB, cacheDays, projectDays;
         TextBlock alertStatus, hiddenEmpty, histTotal, histSub, aboutText;
         string selectedDrive = Native.SysRoot;
         bool loadingSettings;
@@ -314,7 +314,8 @@ namespace DiskSweep
         {
             {Scanner.CatWin, ""}, {Scanner.CatGpu, ""}, {Scanner.CatDev, ""},
             {Scanner.CatWeb, ""}, {Scanner.CatApp, ""}, {Scanner.CatOld, ""},
-            {Scanner.CatProj, "\uE8B7"}, {Scanner.CatLeft, "\uEA86"}, {Scanner.CatBig, "\uE7C3"}
+            {Scanner.CatProj, "\uE8B7"}, {Scanner.CatLeft, "\uEA86"}, {Scanner.CatBig, "\uE7C3"},
+            {Scanner.CatGame, "\uE7FC"}, {Scanner.CatVirt, "\uE7F8"}
         };
 
         public MainUi()
@@ -354,11 +355,13 @@ namespace DiskSweep
             drivesCtl = F<ItemsControl>("Drives"); hiddenList = F<ItemsControl>("HiddenList"); histList = F<ItemsControl>("HistList");
             themeSystem = F<RadioButton>("ThemeSystem"); themeLight = F<RadioButton>("ThemeLight"); themeDark = F<RadioButton>("ThemeDark");
             optRecycle = F<CheckBox>("OptRecycle"); optAlert = F<CheckBox>("OptAlert"); alertGB = F<TextBox>("AlertGB");
+            cacheDays = F<TextBox>("CacheDays"); projectDays = F<TextBox>("ProjectDays");
             alertStatus = F<TextBlock>("AlertStatus"); hiddenEmpty = F<TextBlock>("HiddenEmpty");
             histTotal = F<TextBlock>("HistTotal"); histSub = F<TextBlock>("HistSub"); aboutText = F<TextBlock>("AboutText");
             WireSettings();
             WireDrives();
             WireHealth();
+            WireTools();
 
             view = new ListCollectionView(vms);
             view.GroupDescriptions.Add(new PropertyGroupDescription("Group"));
@@ -385,6 +388,7 @@ namespace DiskSweep
                 if (e.Key == Key.Escape && overlay.Visibility == Visibility.Visible && dlgCancel.Visibility == Visibility.Visible) CloseDialog(0);
                 else if (e.Key == Key.Escape && settingsOverlay.Visibility == Visibility.Visible) CloseSettings();
                 else if (e.Key == Key.Escape && healthOverlay.Visibility == Visibility.Visible) healthOverlay.Visibility = Visibility.Collapsed;
+                else if (e.Key == Key.Escape && toolsOverlay.Visibility == Visibility.Visible) CloseTools();
                 if (e.Key == Key.F5 && !busy) Scan();
             };
             Window.Closing += (s, e) => { if (cleaning) e.Cancel = true; };
@@ -530,7 +534,12 @@ namespace DiskSweep
             alertGB.LostFocus += (s, e) => SaveAlert();
             alertGB.KeyDown += (s, e) => { if (e.Key == Key.Enter) SaveAlert(); };
             alertGB.PreviewTextInput += (s, e) => { e.Handled = !e.Text.All(char.IsDigit); };
-
+            foreach (var box in new[] { cacheDays, projectDays })
+            {
+                box.PreviewTextInput += (s, e) => { e.Handled = !e.Text.All(char.IsDigit); };
+                box.LostFocus += (s, e) => SaveDays();
+                box.KeyDown += (s, e) => { if (e.Key == Key.Enter) SaveDays(); };
+            }
             hiddenList.AddHandler(System.Windows.Controls.Primitives.ButtonBase.ClickEvent, new RoutedEventHandler((s, e) =>
             {
                 var b = e.OriginalSource as Button;
@@ -588,6 +597,17 @@ namespace DiskSweep
                 : "Couldn't create the scheduled check. Try again, or run Disk Sweep as administrator.";
         }
 
+        void SaveDays()
+        {
+            if (loadingSettings) return;
+            int c, p;
+            if (int.TryParse(cacheDays.Text, out c) && c >= 0 && c <= 3650) Settings.CacheDays = c;
+            if (int.TryParse(projectDays.Text, out p) && p >= 0 && p <= 3650) Settings.ProjectDays = p;
+            cacheDays.Text = Settings.CacheDays.ToString();
+            projectDays.Text = Settings.ProjectDays.ToString();
+            Settings.Save();
+        }
+
         void OpenSettings()
         {
             FillSettings();
@@ -598,6 +618,7 @@ namespace DiskSweep
         void CloseSettings()
         {
             SaveAlert();
+            SaveDays();
             settingsOverlay.Visibility = Visibility.Collapsed;
         }
 
@@ -611,6 +632,8 @@ namespace DiskSweep
             bool task = Settings.AlertTaskExists();
             optAlert.IsChecked = Settings.AlertOn && task;
             alertGB.Text = Settings.AlertGB.ToString();
+            cacheDays.Text = Settings.CacheDays.ToString();
+            projectDays.Text = Settings.ProjectDays.ToString();
             alertStatus.Text = optAlert.IsChecked == true
                 ? "On. You'll get a notification if any drive drops below " + Settings.AlertGB + " GB free (at most once a day)."
                 : "Off.";
@@ -639,7 +662,8 @@ namespace DiskSweep
             var folders = Settings.LoadFolders();
             statusText.Text = (lastScan == DateTime.MinValue ? "" : "Last scan " + lastScan.ToShortTimeString() + ".  ")
                 + (Settings.TotalCleaned > 0 ? "Cleaned so far: " + Util.Fmt(Settings.TotalCleaned) + ".  " : "")
-                + (folders.Count > 0 ? "Code folders: " + string.Join(", ", folders) + "." : "Add your code folders to find build folders.");
+                + (folders.Count > 0 ? "Code folders: " + string.Join(", ", folders) + "." : "Add your code folders to find build folders.")
+                + (Scanner.RecentProjectsKept > 0 ? "  Kept " + Scanner.RecentProjectsKept + " build folders of projects you used in the last " + Settings.ProjectDays + " days." : "");
         }
 
         DateTime lastScan = DateTime.MinValue;
@@ -766,6 +790,7 @@ namespace DiskSweep
                 var folders = Settings.LoadFolders().Where(f => f.StartsWith(drive, StringComparison.OrdinalIgnoreCase)).ToList();
                 var result = await Task.Run(() =>
                 {
+                    Scanner.RecentProjectsKept = 0;
                     var r = Scanner.ScanAll(prog, drive);
                     foreach (var f in folders)
                         if (Directory.Exists(f)) r.AddRange(Scanner.FindProjectJunk(f, prog));
@@ -949,7 +974,25 @@ namespace DiskSweep
             //   DiskSweep.exe --report out.txt [projectFolder]   scan only, write results
             //   DiskSweep.exe --selftest emptyFolder             test delete logic on a fixture
             if (args.Length >= 1 && args[0] == "--check-space") return Settings.CheckSpace();   // run by Task Scheduler
-                        if (args.Length >= 2 && args[0] == "--report") return Dev.Report(args);
+                        if (args.Length >= 3 && args[0] == "--test-move")      // <folder> <targetDriveRoot>
+            {
+                string err = Mover.Check(args[1], args[2]) ?? Mover.Move(args[1], args[2], null);
+                File.WriteAllText(Path.Combine(Path.GetTempPath(), "disksweep-test-move.txt"), err ?? "OK " + Mover.TargetFor(args[1], args[2]));
+                return err == null ? 0 : 1;
+            }
+            if (args.Length >= 3 && args[0] == "--test-map")       // <folder> <outFile>
+            {
+                var tree = SpaceMap.Build(args[1], null, System.Threading.CancellationToken.None);
+                var sb = new System.Text.StringBuilder("total " + tree.Size + "\n");
+                foreach (var c in tree.Children.Take(15)) sb.AppendLine(c.Size + "\t" + c.Name);
+                File.WriteAllText(args[2], sb.ToString());
+                return 0;
+            }
+            if (args.Length >= 3 && args[0] == "--test-compress")  // <folder> <outFile>
+            {
+                File.WriteAllText(args[2], (Compressor.CheckFolder(args[1]) ?? "saved " + Compressor.CompressFolder(args[1])));
+                return 0;
+            }            if (args.Length >= 2 && args[0] == "--report") return Dev.Report(args);
             if (args.Length >= 2 && args[0] == "--health-report") { File.WriteAllText(args[1], Health.Report()); return 0; }
             if (args.Length >= 2 && args[0] == "--selftest") return Dev.SelfTest(args[1]);
             //   DiskSweep.exe --test-item <folder>                adds that folder as a deletable item (UI testing)

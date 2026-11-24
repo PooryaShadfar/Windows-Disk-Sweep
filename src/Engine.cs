@@ -18,9 +18,9 @@ using System.Threading.Tasks;
 [assembly: System.Reflection.AssemblyDescription("Find and remove junk files on Windows. You choose what goes.")]
 [assembly: System.Reflection.AssemblyProduct("Disk Sweep")]
 [assembly: System.Reflection.AssemblyCopyright("Copyright (c) 2026 Poorya Shadfar. MIT License.")]
-[assembly: System.Reflection.AssemblyVersion("1.2.0.0")]
-[assembly: System.Reflection.AssemblyFileVersion("1.2.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersion("1.2.0")]
+[assembly: System.Reflection.AssemblyVersion("1.3.0.0")]
+[assembly: System.Reflection.AssemblyFileVersion("1.3.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersion("1.3.0")]
 
 namespace DiskSweep
 {
@@ -154,6 +154,9 @@ namespace DiskSweep
 
         public static bool IsLink(FileSystemInfo i) { return (i.Attributes & FileAttributes.ReparsePoint) != 0; }
 
+        // Last time a file was written or (when Windows tracks it) opened.
+        public static DateTime Recent(FileInfo f) { return f.LastAccessTime > f.LastWriteTime ? f.LastAccessTime : f.LastWriteTime; }
+
         public static bool Exists(string p)
         {
             try { var lp = Long(p); return Directory.Exists(lp) || File.Exists(lp); } catch { return false; }
@@ -184,7 +187,7 @@ namespace DiskSweep
                 {
                     if (IsLink(e)) continue;
                     var f = e as FileInfo;
-                    if (f != null) { if (f.LastWriteTime < cutoff) t += f.Length; }
+                    if (f != null) { if (Recent(f) < cutoff) t += f.Length; }
                     else t += TreeSize((DirectoryInfo)e, cutoff);
                 }
                 catch { }
@@ -209,7 +212,7 @@ namespace DiskSweep
                     var f = e as FileInfo;
                     if (f != null)
                     {
-                        if (f.LastWriteTime >= cutoff) continue;
+                        if (Recent(f) >= cutoff) continue;
                         long len = f.Length;
                         if ((f.Attributes & FileAttributes.ReadOnly) != 0) f.Attributes = FileAttributes.Normal;
                         f.Delete();
@@ -376,12 +379,23 @@ namespace DiskSweep
                 P(PD, "NVIDIA Corporation", "NVIDIA App", "UpdateFramework", "ota-artifacts"), P(PD, "NVIDIA Corporation", "Downloader")));
 
             // --- developer
-            Add(l, Mk(CatDev, "npm cache", "Downloaded npm packages. Next install downloads them again.", Safety.Safe, false,
-                P(L, "npm-cache", "_cacache"), P(L, "npm-cache", "_npx")), "node");
-            Add(l, Mk(CatDev, "pnpm store", "Shared pnpm package store. Existing projects keep working.", Safety.Safe, false,
-                P(L, "pnpm", "store"), P(L, "pnpm-cache")), "node");
-            Add(l, Mk(CatDev, "Yarn cache", "Downloaded Yarn packages.", Safety.Safe, false, P(L, "Yarn", "Cache")));
-            Add(l, Mk(CatDev, "Bun cache", "Downloaded Bun packages.", Safety.Safe, false, P(U, ".bun", "install", "cache")));
+            // Package caches: keep what was downloaded or used in the last N days (Settings).
+            int keepDays = Settings.CacheDays;
+            string keepNote = keepDays > 0 ? "  Keeps packages used in the last " + keepDays + " days." : "";
+            var pkg = new[]
+            {
+                Mk(CatDev, "npm cache", "Downloaded npm packages. Next install downloads them again." + keepNote, Safety.Safe, false,
+                    P(L, "npm-cache", "_cacache"), P(L, "npm-cache", "_npx")),
+                Mk(CatDev, "pnpm store", "Shared pnpm package store. Existing projects keep working." + keepNote, Safety.Safe, false,
+                    P(L, "pnpm", "store"), P(L, "pnpm-cache")),
+                Mk(CatDev, "Yarn cache", "Downloaded Yarn packages." + keepNote, Safety.Safe, false, P(L, "Yarn", "Cache")),
+                Mk(CatDev, "Bun cache", "Downloaded Bun packages." + keepNote, Safety.Safe, false, P(U, ".bun", "install", "cache"))
+            };
+            foreach (var it in pkg)
+            {
+                it.MinAgeHours = keepDays * 24;
+                Add(l, it, "node");
+            }
             Add(l, Mk(CatDev, "pip cache", "Downloaded Python packages.", Safety.Safe, false, P(L, "pip", "Cache")));
             Add(l, Mk(CatDev, "NuGet HTTP cache", "Downloaded .NET package data.", Safety.Safe, false,
                 P(L, "NuGet", "v3-cache"), P(L, "NuGet", "plugins-cache"), P(L, "NuGet", "Cache")));
@@ -523,12 +537,16 @@ namespace DiskSweep
                 return other;
             }
             var list = Build();
+            SystemLeftovers(list);
+            if (p != null) p.Report("Looking for game launchers…");
+            GameCaches(list);
             foreach (var it in list)
             {
                 if (p != null) p.Report("Measuring: " + it.Name);
-                it.Size = SizeOf(it);
+                if (it.Size < 0 || it.Category != CatGame) it.Size = SizeOf(it);
             }
             Leftovers(list, p);
+            Virtualization(list);
             list.AddRange(LargeFiles(p, drive));
             return list;
         }
@@ -557,9 +575,12 @@ namespace DiskSweep
                     }
                 case Mode.Command:
                     {
-                        long before = Native.FreeBytes();
-                        RunHidden(it.Cmd, it.CmdArgs);
-                        return Math.Max(0, Native.FreeBytes() - before);
+                        string drive = it.Paths.Count > 0 ? Path.GetPathRoot(it.Paths[0]) : null;
+                        long before = Native.FreeBytes(drive);
+                        if (it.Cmd == "sagerun") SystemCommands.SageRun(it.CmdArgs);
+                        else if (it.Cmd == "compact-vhdx") SystemCommands.CompactVhdx(it.CmdArgs);
+                        else RunHidden(it.Cmd, it.CmdArgs);
+                        return Math.Max(0, Native.FreeBytes(drive) - before);
                     }
                 default:
                     {
@@ -694,7 +715,24 @@ namespace DiskSweep
                 if (moved != 5000 || !folderKept || !emptied) ok = false;
             }
             catch (Exception ex) { ok = false; log.AppendLine("ERROR: " + ex); }
-            try { if (!Health.SelfTest(log)) ok = false; } catch (Exception ex) { ok = false; log.AppendLine("health ERROR: " + ex.Message); }
+            try
+            {
+                // Age filter: files used recently are kept.
+                string ac = Path.Combine(dir, "age-cache");
+                Directory.CreateDirectory(ac);
+                string oldF = Path.Combine(ac, "old.bin"), newF = Path.Combine(ac, "new.bin");
+                File.WriteAllText(oldF, new string('o', 3000)); File.WriteAllText(newF, new string('n', 2000));
+                var past = DateTime.Now.AddDays(-60);
+                File.SetLastWriteTime(oldF, past); File.SetLastAccessTime(oldF, past);
+                var aItem = new CleanItem { Mode = Mode.Contents, MinAgeHours = 30 * 24 };
+                aItem.Paths.Add(ac);
+                long measured = Scanner.SizeOf(aItem);
+                long removed = Cleaner.Clean(aItem);
+                bool keptNew = File.Exists(newF), goneOld = !File.Exists(oldF);
+                log.AppendLine("age filter: measured " + measured + " (expect 3000), removed " + removed + ", new kept: " + keptNew + ", old removed: " + goneOld);
+                if (measured != 3000 || removed != 3000 || !keptNew || !goneOld) ok = false;
+            }
+            catch (Exception ex) { ok = false; log.AppendLine("age ERROR: " + ex.Message); }            try { if (!Health.SelfTest(log)) ok = false; } catch (Exception ex) { ok = false; log.AppendLine("health ERROR: " + ex.Message); }
             log.AppendLine(ok ? "SELFTEST PASS" : "SELFTEST FAIL");
             File.WriteAllText(Path.Combine(dir, "selftest.txt"), log.ToString());
             return ok ? 0 : 1;

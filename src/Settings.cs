@@ -30,6 +30,8 @@ namespace DiskSweep
         public static bool RecycleReview = true;        // "Check first" items go to the Recycle Bin
         public static bool AlertOn;
         public static int AlertGB = 10;
+        public static int CacheDays = 30;           // package caches: keep files used in the last N days
+        public static int ProjectDays = 14;         // build folders: skip projects changed in the last N days
         public static DateTime LastAlert = DateTime.MinValue;
         public static Dictionary<string, string> Hidden = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase); // key -> label
         public static List<HistoryEntry> History = new List<HistoryEntry>();
@@ -50,6 +52,8 @@ namespace DiskSweep
                             case "RecycleReview": RecycleReview = v == "1"; break;
                             case "AlertOn": AlertOn = v == "1"; break;
                             case "AlertGB": int g; if (int.TryParse(v, out g) && g > 0) AlertGB = g; break;
+                            case "CacheDays": int cd; if (int.TryParse(v, out cd) && cd >= 0) CacheDays = cd; break;
+                            case "ProjectDays": int pd; if (int.TryParse(v, out pd) && pd >= 0) ProjectDays = pd; break;
                             case "LastAlert":
                                 DateTime d;
                                 if (DateTime.TryParse(v, CultureInfo.InvariantCulture, DateTimeStyles.None, out d)) LastAlert = d;
@@ -96,6 +100,8 @@ namespace DiskSweep
                     "RecycleReview=" + (RecycleReview ? "1" : "0"),
                     "AlertOn=" + (AlertOn ? "1" : "0"),
                     "AlertGB=" + AlertGB,
+                    "CacheDays=" + CacheDays,
+                    "ProjectDays=" + ProjectDays,
                     "LastAlert=" + LastAlert.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)
                 });
                 File.WriteAllLines(HiddenFile, Hidden.Select(kv => kv.Key + "\t" + kv.Value.Replace("\t", " ")));

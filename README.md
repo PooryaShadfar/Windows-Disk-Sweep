@@ -12,7 +12,7 @@
 <p align="center">
   <a href="https://github.com/PooryaShadfar/Windows-Disk-Sweep/releases/latest"><img src="https://img.shields.io/github/v/release/PooryaShadfar/Windows-Disk-Sweep?label=download&color=0F6CBD" alt="Latest release"></a>
   <img src="https://img.shields.io/badge/Windows-10%20%7C%2011-0F6CBD" alt="Windows 10 and 11">
-  <img src="https://img.shields.io/badge/size-~200%20KB-brightgreen" alt="Size">
+  <img src="https://img.shields.io/badge/size-~270%20KB-brightgreen" alt="Size">
   <a href="LICENSE"><img src="https://img.shields.io/github/license/PooryaShadfar/Windows-Disk-Sweep?color=lightgrey" alt="MIT license"></a>
 </p>
 
@@ -37,16 +37,23 @@ Disk Sweep scans the usual places, shows how much each one takes, and lets you p
 - **Shows your largest files.** Lists the biggest files in your folders, such as old zips, videos and installers. These always go to the **Recycle Bin**, never straight to deletion.
 - **Undo-friendly.** "Check first" items go to the Recycle Bin by default, so a mistake can be undone.
 - **All your drives.** Switch between C:, D:, E: and so on in the drive card.
+- **Tools.** A **space map** of any drive or folder, **apps by size** with uninstall, **move a folder** to another drive (Downloads, npm cache, …) with a link left behind, and **compression** for Windows and rarely used folders.
+- **Game caches.** Steam shader cache per game, Steam leftovers, and Epic, Battle.net, EA, Ubisoft and GOG launcher caches.
+- **Keeps your current work.** Package caches keep what you used in the last 30 days, and build folders of projects you touched in the last 14 days are skipped. Both are adjustable.
 - **Drive health.** See whether each SSD and HDD is healthy. As administrator you also see SSD life used, temperature, power-on time, error counts and HDD SMART warnings such as replaced sectors.
 - **Low-space and health alert.** Optional: Windows notifies you when a drive drops below a limit you set or reports a health problem.
 - **Hide items.** Click the eye button to never see an item again. You can bring it back in Settings.
 - **History.** See how much you've cleaned in total.
 - **Safe deletion.** It never follows links or junctions out of a folder, so pnpm stores and git worktrees can't pull in files from elsewhere. It handles very long paths and skips files that are in use.
 - **Modern UI.** Light, dark, or the same as Windows. You choose in Settings. Works with the keyboard and screen readers.
-- **Tiny and portable.** One ~200 KB `.exe`, no installer, no telemetry, no network access. It uses the .NET Framework 4.8 that ships with Windows.
+- **Tiny and portable.** One ~270 KB `.exe`, no installer, no telemetry, no network access. It uses the .NET Framework 4.8 that ships with Windows.
 
 <p align="center">
   <img src="docs/confirm.png" alt="Confirmation dialog before deleting" width="640">
+</p>
+
+<p align="center">
+  <img src="docs/space-map.png" alt="Space map of the C: drive" width="640">
 </p>
 
 <p align="center">
@@ -76,23 +83,38 @@ Disk Sweep scans the usual places, shows how much each one takes, and lets you p
 5. **Click "Clean".** Check the list in the confirmation dialog, then confirm.
 6. **See the result.** Disk Sweep shows what each item freed, then scans again.
 
-Some system folders need **Run as administrator**. These items show in grey until you restart Disk Sweep with admin rights.
+Some system folders need administrator rights. These items show in grey until you click the **shield button** at the top to restart Disk Sweep as administrator.
+
+## Tools
+
+Click **Tools** at the top:
+
+| Tool | What it does |
+|---|---|
+| **Space map** | A map of a drive or folder: bigger box = more space. Click a box to look inside. Read-only. A whole drive takes about a minute to measure |
+| **Apps by size** | Installed programs, biggest first, with publisher, version and install date. **Uninstall…** opens the app's own uninstaller. Store apps open in Windows Settings |
+| **Move a folder** | Moves a folder such as Downloads or the npm cache to another drive. Disk Sweep copies it, checks the copy, leaves a link in the old place (Downloads is moved the Windows way), then removes the old copy. If anything goes wrong, the folder goes back where it was. System folders and Steam libraries are blocked; use Steam's own *Move install folder* for games |
+| **Compress** | Windows' built-in compression. **Compress Windows** (CompactOS, admin) usually saves 2–5 GB. **Compress a folder** shrinks folders you rarely use; files keep working as normal |
+
+Nothing in Tools runs on its own. Every change asks first.
 
 ## What it can clean
 
 | Category | Examples | Notes |
 |---|---|---|
 | Windows & temp files | Recycle Bin, your temp files, Windows temp, Windows Update downloads, Delivery Optimization cache, crash dumps, error reports, thumbnail cache | Temp files changed in the last 24 h are kept |
-| Windows (advanced) | Hibernation file, old component versions (WinSxS cleanup with DISM) | Admin only. Hibernation can be turned back on with `powercfg /h on` |
+| Windows (advanced) | Hibernation file, old component versions (WinSxS cleanup with DISM), previous Windows installation (`Windows.old`), Windows setup leftovers (`$Windows.~BT`, `$Windows.~WS`, `$WinREAgent`) | Admin only. Uses Windows' own Disk Cleanup. After removing `Windows.old` you can't roll back the upgrade |
 | Graphics caches | NVIDIA, AMD, Intel and DirectX shader caches, old NVIDIA driver downloads | Games may stutter briefly the first time after cleaning |
 | Driver installer leftovers | `C:\AMD`, `C:\NVIDIA`, `C:\Intel` | Driver installers unpack here and never clean up |
-| Developer caches | npm, pnpm, Yarn, Bun, pip, NuGet, Gradle, Go, Cargo, Playwright browsers | Packages download again when needed |
+| Developer caches | npm, pnpm, Yarn, Bun, pip, NuGet, Gradle, Go, Cargo, Playwright browsers | Packages download again when needed. npm/pnpm/Yarn/Bun keep packages used in the last 30 days (Settings) |
+| Game caches | Steam shader cache per game, Steam temp files and old downloads, Epic Games, Battle.net, EA app, Ubisoft Connect and GOG Galaxy caches | Your games and saves stay. Shader caches rebuild when you play |
+| WSL & Docker | WSL and Docker Desktop virtual disks (`ext4.vhdx`), Docker build cache, unused Docker images | Shrinking a disk shuts WSL down and gives back unused space. Nothing inside is deleted |
 | Browser caches | Chrome, Edge, Brave, Vivaldi, Opera, Firefox | Only the cache. Logins, history and bookmarks stay |
 | App caches | VS Code, Cursor, Windsurf, Discord, Slack, Figma, Postman, ClickUp, Spotify, Steam, Telegram | Only the cache. Settings and data stay |
 | Old program versions | Older JetBrains IDE folders (for example `WebStorm2025.3`) | Keeps your newest version and skips versions that are still installed |
 | Leftovers of removed apps | AppData folders of apps that are no longer installed | Only folders over 50 MB, unchanged for 30+ days. Always "Check first" |
 | Large files | The 40 biggest files (100 MB+) in your folders and on the selected drive | Always go to the Recycle Bin. Installed games and app folders are skipped |
-| Project build folders | `node_modules`, `.next`/`.nuxt`/`.turbo`/`.svelte-kit`/`.angular`/`.vite`, .NET `bin`/`obj`, Rust `target`, Gradle `build`, Python venvs and `__pycache__` in your code folders | Your code stays. Each item says how to restore it |
+| Project build folders | `node_modules`, `.next`/`.nuxt`/`.turbo`/`.svelte-kit`/`.angular`/`.vite`, .NET `bin`/`obj`, Rust `target`, Gradle `build`, Python venvs and `__pycache__` in your code folders | Your code stays. Projects you worked on in the last 14 days are skipped (Settings) |
 
 Items under 1 MB are hidden to keep the list short. On drives other than the Windows drive, Disk Sweep shows that drive's Recycle Bin, large files and code folders.
 
@@ -115,6 +137,7 @@ Click the gear button to open Settings:
 - **Appearance:** same as Windows, Light or Dark.
 - **Safety:** send "Check first" items to the Recycle Bin (on by default).
 - **Low-space and health alert:** get a Windows notification when a drive drops below a limit you set or reports a health problem. It checks every 3 hours while you're signed in, and notifies you at most once a day.
+- **Developers:** keep package caches used in the last N days (default 30), and skip build folders of projects you worked on in the last N days (default 14). A project counts as "worked on" when its files, git index or installed packages changed.
 - **Hidden items:** bring back items you hid.
 - **History:** total space cleaned and your recent cleanups.
 
@@ -159,6 +182,9 @@ bin\DiskSweep.exe --test-item <folder>             :: show <folder> as a deletab
 bin\DiskSweep.exe --test-recycle <path>            :: same, but the item goes to the Recycle Bin
 bin\DiskSweep.exe --check-space                    :: the low-space and health check that Task Scheduler runs
 bin\DiskSweep.exe --health-report health.txt       :: write drive health to a text file (run as admin for full data)
+bin\DiskSweep.exe --test-map <folder> map.txt      :: measure a folder like the space map does
+bin\DiskSweep.exe --test-move <folder> <drive:\>   :: move a folder like the Move tool does (it really moves it)
+bin\DiskSweep.exe --test-compress <folder> out.txt :: compress a folder like the Compress tool does
 ```
 
 ### Project layout
@@ -168,6 +194,9 @@ src/Engine.cs        what to look for, how to measure it, how to delete it
 src/Finders.cs       removed-app leftovers, large files, project build folders
 src/Settings.cs      settings, hidden items, history, low-space alert
 src/Health.cs        SSD/HDD health: status, wear, temperature, SMART
+src/Finders2.cs      game caches, Windows.old and setup leftovers, WSL and Docker disks
+src/Tools.cs         space map, apps by size, folder mover, compression
+src/ToolsUi.cs       the Tools window
 src/App.cs           WPF window logic, theme, dialogs, settings page
 src/MainWindow.xaml  the layout and styles
 assets/              app icon and the script that draws it
